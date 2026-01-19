@@ -1,8 +1,8 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
+# Build output (committed for npm git installs)
+# dist/
 
 # Environment (contains secrets)
 .env
