@@ -97,8 +97,7 @@ Add to the `mcpServers` section:
   "mcpServers": {
     "deepseek": {
       "command": "node",
-      "args": ["dist/index.js"],
-      "cwd": "/path/to/deepseek-mcp-server",
+      "args": ["/absolute/path/to/deepseek-mcp-server/dist/index.js"],
       "env": {
         "DEEPSEEK_API_KEY": "your-deepseek-api-key"
       }
@@ -106,6 +105,11 @@ Add to the `mcpServers` section:
   }
 }
 ```
+
+**Important:** Use the absolute path to `dist/index.js`. Examples:
+- Windows: `"C:/Users/YourName/deepseek-mcp-server/dist/index.js"`
+- Mac: `"/Users/yourname/deepseek-mcp-server/dist/index.js"`
+- Linux: `"/home/yourname/deepseek-mcp-server/dist/index.js"`
 
 **Optional:** Add Brave API key for web search:
 ```json
