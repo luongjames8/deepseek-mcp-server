@@ -1,0 +1,42 @@
+# DeepSeek Agent MCP Server Configuration
+
+# Model settings
+model:
+  default: "deepseek-chat"          # Default model for tasks
+  allowed:                           # Allowlist of models
+    - "deepseek-chat"
+    - "deepseek-reasoner"
+
+# Agent limits
+agent:
+  max_iterations: 50                 # Max tool call loops per task
+  timeout_seconds: 300               # Overall task timeout (5 minutes)
+  output_truncate_chars: 50000       # Max chars per tool output
+
+# Tool-specific settings
+tools:
+  bash:
+    default_timeout: 120             # Seconds per command
+    max_timeout: 600                 # Maximum allowed timeout (10 minutes)
+  glob:
+    max_results: 100                 # Max files returned
+  grep:
+    max_results: 100                 # Max matches returned
+
+# Security
+security:
+  working_dir: null                  # Override working_dir (null = use param)
+  allow_symlinks: false              # Follow symlinks outside sandbox
+
+# Logging
+logging:
+  level: "DEBUG"                     # DEBUG, INFO, WARNING, ERROR
+  file: "deepseek-agent.log"         # Log file path (null = stderr only)
+  include_tool_outputs: true         # Log full tool outputs
+
+# Web fetch tool settings
+web_fetch:
+  timeout_seconds: 15                # HTTP request timeout
+  max_content_chars: 50000           # Truncate content over this limit
+  min_content_chars: 500             # Error if content shorter (likely JS-rendered)
+  max_response_tokens: 4000          # Max DeepSeek response tokens

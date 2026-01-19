@@ -1,0 +1,50 @@
+{
+  "name": "deepseek-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server that delegates tasks from Claude to DeepSeek for 10-50x cost savings",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "deepseek-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "deepseek",
+    "llm",
+    "ai",
+    "model-context-protocol",
+    "anthropic",
+    "claude-code"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luongjames8/deepseek-mcp-server"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "openai": "^4.77.0",
+    "cheerio": "^1.0.0",
+    "js-yaml": "^4.1.0",
+    "glob": "^11.0.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
