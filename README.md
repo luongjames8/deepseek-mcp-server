@@ -68,9 +68,10 @@ Use web_search to find the latest TypeScript 5.4 features
 ## Installation
 
 ### Prerequisites
-- Node.js 20+
-- Claude Code CLI
-- DeepSeek API key ([get one here](https://platform.deepseek.com/))
+- **Node.js 20+** - [Download](https://nodejs.org/)
+- **Claude Code CLI** - [Installation guide](https://docs.anthropic.com/en/docs/claude-code)
+- **DeepSeek API key** (required) - [Get one here](https://platform.deepseek.com/api_keys) (~$0.14/M tokens)
+- **Brave Search API key** (optional, for web_search) - [Get one here](https://brave.com/search/api/) (free tier available)
 
 ### Step 1: Clone and Build
 
