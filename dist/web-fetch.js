@@ -204,4 +204,45 @@ ${response}`;
         return `[web_fetch: ${url}]\nError: DeepSeek processing failed: ${e}`;
     }
 }
+/**
+ * Fetch URL and return raw extracted text (no DeepSeek processing).
+ * Used for content verification where exact text matching is needed.
+ */
+export async function fetchRaw(url, config) {
+    const effectiveConfig = {
+        timeoutSeconds: config?.timeoutSeconds ?? 15,
+        maxContentChars: config?.maxContentChars ?? 50000,
+        minContentChars: config?.minContentChars ?? 500,
+        maxResponseTokens: config?.maxResponseTokens ?? 8192,
+        userAgent: config?.userAgent ?? DEFAULT_USER_AGENT,
+    };
+    const totalStart = Date.now();
+    const timing = { fetch: 0, parse: 0, total: 0 };
+    // Step 1: Fetch URL
+    const fetchStart = Date.now();
+    const fetchResult = await fetchUrl(url, effectiveConfig);
+    timing.fetch = Date.now() - fetchStart;
+    if (!fetchResult.success) {
+        return `[web_fetch_raw: ${url}]
+Status: error
+Error: ${fetchResult.error}`;
+    }
+    // Step 2: Parse HTML (reuse existing parseHtml)
+    const parseStart = Date.now();
+    const parseResult = parseHtml(fetchResult.content, effectiveConfig);
+    timing.parse = Date.now() - parseStart;
+    if (!parseResult.success) {
+        return `[web_fetch_raw: ${url}]
+Status: error
+Error: ${parseResult.error}`;
+    }
+    // Step 3: Return raw content (NO DeepSeek processing)
+    timing.total = Date.now() - totalStart;
+    return `[web_fetch_raw: ${url}]
+Status: ok
+Chars extracted: ${parseResult.charsExtracted}
+Timing: fetch=${timing.fetch}ms, parse=${timing.parse}ms, total=${timing.total}ms
+
+${parseResult.content}`;
+}
 //# sourceMappingURL=web-fetch.js.map

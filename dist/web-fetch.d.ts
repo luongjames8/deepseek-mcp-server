@@ -9,3 +9,8 @@ import type { WebFetchConfig } from "./types.js";
  * Main entry point: fetch URL, parse HTML, process with DeepSeek
  */
 export declare function fetchAndProcess(url: string, prompt: string, config?: Partial<WebFetchConfig>): Promise<string>;
+/**
+ * Fetch URL and return raw extracted text (no DeepSeek processing).
+ * Used for content verification where exact text matching is needed.
+ */
+export declare function fetchRaw(url: string, config?: Partial<WebFetchConfig>): Promise<string>;

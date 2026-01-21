@@ -2,10 +2,11 @@
 /**
  * DeepSeek Agent MCP Server
  *
- * Provides four tools:
+ * Provides five tools:
  * - deepseek_agent: Agentic tool-calling loop with file/bash access
  * - deepseek_chat: Simple chat completion (fast, no tools)
  * - web_fetch: Fetch URL and extract info with DeepSeek
+ * - web_fetch_raw: Fetch URL and return raw text (no AI processing)
  * - web_search: Search web with Brave and synthesize with DeepSeek
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,7 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextpro
 import OpenAI from "openai";
 import { loadConfig, getApiKey, getBaseUrl } from "./config.js";
 import { DeepSeekAgent, formatResult } from "./agent.js";
-import { fetchAndProcess } from "./web-fetch.js";
+import { fetchAndProcess, fetchRaw } from "./web-fetch.js";
 import { searchAndSynthesize } from "./web-search.js";
 // Load configuration
 const config = loadConfig();
@@ -126,6 +127,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 },
             },
             {
+                name: "web_fetch_raw",
+                description: "Fetch a web page and return raw extracted text content. " +
+                    "Unlike web_fetch, this does NOT process content with AI - it returns " +
+                    "the actual text from the page for verification or content extraction. " +
+                    "HTML is parsed and noise (scripts, nav, ads) is removed, but no " +
+                    "summarization or interpretation happens.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        url: {
+                            type: "string",
+                            description: "The URL to fetch",
+                        },
+                    },
+                    required: ["url"],
+                },
+            },
+            {
                 name: "web_search",
                 description: "Search the web and get synthesized results. " +
                     "HIGH LATENCY (10-30 seconds) - searches Brave, fetches top results, synthesizes with DeepSeek. " +
@@ -219,6 +238,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 maxContentChars: config.webFetch.maxContentChars,
                 minContentChars: config.webFetch.minContentChars,
                 maxResponseTokens: config.webFetch.maxResponseTokens,
+                userAgent: config.webFetch.userAgent,
+            });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result,
+                    },
+                ],
+            };
+        }
+        if (name === "web_fetch_raw") {
+            const url = args?.url;
+            const result = await fetchRaw(url, {
+                timeoutSeconds: config.webFetch.timeoutSeconds,
+                maxContentChars: config.webFetch.maxContentChars,
+                minContentChars: config.webFetch.minContentChars,
                 userAgent: config.webFetch.userAgent,
             });
             return {
