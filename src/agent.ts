@@ -7,9 +7,10 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
-import type { AgentResult, Config, ErrorType } from "./types.js";
+import type { AgentResult, Config, ErrorType, AgentCallParams } from "./types.js";
 import { getApiKey, getBaseUrl, loadConfig } from "./config.js";
 import { TOOL_DEFINITIONS, ToolExecutor } from "./tools.js";
+import { buildExtraParams, validateModel } from "./api-params.js";
 
 const SYSTEM_PROMPT = `You are a coding agent with access to file, shell, and web tools. Execute the user's task precisely.
 
@@ -55,24 +56,15 @@ When the task is complete, provide a brief summary:
 3. Any warnings or issues
 `;
 
-/**
- * Generate a unique task ID
- */
 function generateTaskId(): string {
   return randomUUID().slice(0, 8);
 }
 
-/**
- * Check if working_dir is a GSD-managed project
- */
 function detectGsdProject(workingDir: string): boolean {
   const planningDir = join(workingDir, ".planning");
   return existsSync(planningDir);
 }
 
-/**
- * Load GSD context for system prompt enhancement
- */
 function getGsdContext(workingDir: string): string {
   if (!detectGsdProject(workingDir)) {
     return "";
@@ -92,9 +84,6 @@ function getGsdContext(workingDir: string): string {
   return contextParts.join("\n\n");
 }
 
-/**
- * Extract partial progress from message history
- */
 function extractProgress(
   messages: ChatCompletionMessageParam[]
 ): string | undefined {
@@ -113,12 +102,9 @@ function extractProgress(
   if (progressParts.length === 0) {
     return undefined;
   }
-  return progressParts.slice(-5).join("\n"); // Last 5 relevant messages
+  return progressParts.slice(-5).join("\n");
 }
 
-/**
- * Format agent result for MCP response
- */
 function formatResult(result: AgentResult): string {
   if (result.success) {
     return result.content;
@@ -134,51 +120,46 @@ function formatResult(result: AgentResult): string {
   return output;
 }
 
-/**
- * DeepSeek Agent class
- */
 export class DeepSeekAgent {
   private config: Config;
-  private client: OpenAI;
 
   constructor(config?: Config) {
     this.config = config ?? loadConfig();
-    this.client = new OpenAI({
-      apiKey: getApiKey(),
-      baseURL: getBaseUrl(),
-    });
   }
 
   /**
-   * Execute a task using the agentic loop
+   * Execute a task using the agentic loop.
+   * `params` is caller-supplied; anything omitted falls back to config defaults.
    */
   async run(
     prompt: string,
     workingDir: string,
-    model?: string,
-    maxIterations?: number,
-    timeoutSeconds?: number
+    params: AgentCallParams = {},
   ): Promise<AgentResult> {
-    // Apply defaults from config
-    model = model ?? this.config.model.default;
-    maxIterations = maxIterations ?? this.config.agent.maxIterations;
-    timeoutSeconds = timeoutSeconds ?? this.config.agent.timeoutSeconds;
+    const model = params.model ?? this.config.agent.defaultModel;
+    const maxIterations = params.maxIterations ?? this.config.agent.maxIterations;
+    const timeoutSeconds = params.timeoutSeconds ?? this.config.agent.timeoutSeconds;
 
-    // Validate model
-    if (!this.config.model.allowed.includes(model)) {
+    const validationError = validateModel(model, this.config.model.allowed);
+    if (validationError) {
       return {
         success: false,
-        content: `Model '${model}' not in allowed list: ${this.config.model.allowed.join(", ")}`,
+        content: validationError,
         iterationsUsed: 0,
         errorType: "unknown" as ErrorType,
       };
     }
 
-    const taskId = generateTaskId();
+    // Strict tools mode → use beta endpoint (per DeepSeek docs)
+    const client = new OpenAI({
+      apiKey: getApiKey(),
+      baseURL: getBaseUrl(params.strictTools ?? false),
+    });
+
+    const _taskId = generateTaskId();
     const startTime = Date.now();
     const toolsCalled: string[] = [];
 
-    // Build system prompt with optional GSD context
     let systemPrompt = SYSTEM_PROMPT;
     const gsdContext = getGsdContext(workingDir);
     if (gsdContext) {
@@ -196,18 +177,20 @@ export class DeepSeekAgent {
       this.config.webSearch
     );
 
-    // Convert tool definitions to OpenAI format
-    const tools: ChatCompletionTool[] = TOOL_DEFINITIONS.map((t) => ({
-      type: "function" as const,
-      function: {
+    const tools: ChatCompletionTool[] = TOOL_DEFINITIONS.map((t) => {
+      const fn: ChatCompletionTool["function"] = {
         name: t.function.name,
         description: t.function.description,
         parameters: t.function.parameters,
-      },
-    }));
+      };
+      // Strict mode requires `strict: true` on each tool
+      if (params.strictTools) {
+        (fn as unknown as Record<string, unknown>).strict = true;
+      }
+      return { type: "function" as const, function: fn };
+    });
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      // Check timeout
       const elapsed = Date.now() - startTime;
       if (elapsed > timeoutSeconds * 1000) {
         return {
@@ -220,10 +203,9 @@ export class DeepSeekAgent {
         };
       }
 
-      // Call API with retry
       let response;
       try {
-        response = await this.callApiWithRetry(model, messages, tools);
+        response = await this.callApiWithRetry(client, model, messages, tools, params);
       } catch (e) {
         const errorType =
           e instanceof Error && e.message.includes("rate")
@@ -252,7 +234,6 @@ export class DeepSeekAgent {
         };
       }
 
-      // No tool calls = task complete
       if (!message.tool_calls || message.tool_calls.length === 0) {
         return {
           success: true,
@@ -262,7 +243,6 @@ export class DeepSeekAgent {
         };
       }
 
-      // Process tool calls
       messages.push({
         role: "assistant",
         content: message.content,
@@ -300,7 +280,6 @@ export class DeepSeekAgent {
       }
     }
 
-    // Max iterations reached
     return {
       success: false,
       content: "Max iterations reached",
@@ -315,22 +294,29 @@ export class DeepSeekAgent {
    * Call DeepSeek API with exponential backoff retry
    */
   private async callApiWithRetry(
+    client: OpenAI,
     model: string,
     messages: ChatCompletionMessageParam[],
     tools: ChatCompletionTool[],
+    params: AgentCallParams,
     maxRetries: number = 3
   ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     let lastError: Error | null = null;
 
+    const extra = buildExtraParams(params);
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        return await this.client.chat.completions.create({
+        const body = {
           model,
           messages,
           tools,
-          tool_choice: "auto",
-          max_tokens: 8192,
-        });
+          tool_choice: "auto" as const,
+          ...extra,
+        };
+        return await client.chat.completions.create(
+          body as unknown as Parameters<typeof client.chat.completions.create>[0],
+        ) as OpenAI.Chat.Completions.ChatCompletion;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
         const errorMsg = lastError.message.toLowerCase();
@@ -342,7 +328,7 @@ export class DeepSeekAgent {
           errorMsg.includes("connection")
         ) {
           if (attempt < maxRetries - 1) {
-            const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+            const delay = Math.pow(2, attempt) * 1000;
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
@@ -355,21 +341,13 @@ export class DeepSeekAgent {
   }
 }
 
-/**
- * Convenience function to run the agent
- */
 export async function runAgent(
   prompt: string,
   workingDir: string,
-  model: string = "deepseek-chat",
-  maxIterations: number = 50,
-  timeoutSeconds: number = 300
+  params: AgentCallParams = {},
 ): Promise<AgentResult> {
   const agent = new DeepSeekAgent();
-  return agent.run(prompt, workingDir, model, maxIterations, timeoutSeconds);
+  return agent.run(prompt, workingDir, params);
 }
 
-/**
- * Format result for MCP response
- */
 export { formatResult };

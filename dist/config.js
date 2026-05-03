@@ -22,13 +22,22 @@ for (const envPath of envPaths) {
 // Default configuration
 const DEFAULT_CONFIG = {
     model: {
-        default: "deepseek-chat",
-        allowed: ["deepseek-chat", "deepseek-reasoner"],
+        default: "deepseek-v4-pro",
+        allowed: [
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
     },
     agent: {
+        defaultModel: "deepseek-v4-pro",
         maxIterations: 50,
         timeoutSeconds: 300,
         outputTruncateChars: 50000,
+    },
+    chat: {
+        defaultModel: "deepseek-v4-pro",
     },
     tools: {
         bash: {
@@ -48,6 +57,7 @@ const DEFAULT_CONFIG = {
         includeToolOutputs: true,
     },
     webFetch: {
+        defaultModel: "deepseek-v4-flash",
         timeoutSeconds: 15,
         maxContentChars: 50000,
         minContentChars: 500,
@@ -55,6 +65,7 @@ const DEFAULT_CONFIG = {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     },
     webSearch: {
+        defaultModel: "deepseek-v4-flash",
         maxResults: 10,
         maxResponseTokens: 8192,
     },
@@ -63,8 +74,7 @@ const DEFAULT_CONFIG = {
  * Load configuration from YAML file or use defaults
  */
 export function loadConfig(configPath) {
-    let config = structuredClone(DEFAULT_CONFIG);
-    // Search for config file
+    const config = structuredClone(DEFAULT_CONFIG);
     if (!configPath) {
         const searchPaths = [
             join(process.cwd(), "config.yaml"),
@@ -83,7 +93,6 @@ export function loadConfig(configPath) {
             const content = readFileSync(configPath, "utf-8");
             const data = yaml.load(content);
             if (data) {
-                // Load model config
                 if (data.model && typeof data.model === "object") {
                     const m = data.model;
                     config.model = {
@@ -91,17 +100,22 @@ export function loadConfig(configPath) {
                         allowed: m.allowed ?? config.model.allowed,
                     };
                 }
-                // Load agent config
                 if (data.agent && typeof data.agent === "object") {
                     const a = data.agent;
                     config.agent = {
+                        defaultModel: a.default_model ?? config.agent.defaultModel,
                         maxIterations: a.max_iterations ?? config.agent.maxIterations,
                         timeoutSeconds: a.timeout_seconds ?? config.agent.timeoutSeconds,
                         outputTruncateChars: a.output_truncate_chars ??
                             config.agent.outputTruncateChars,
                     };
                 }
-                // Load tools config
+                if (data.chat && typeof data.chat === "object") {
+                    const c = data.chat;
+                    config.chat = {
+                        defaultModel: c.default_model ?? config.chat.defaultModel,
+                    };
+                }
                 if (data.tools && typeof data.tools === "object") {
                     const t = data.tools;
                     const bashData = (t.bash ?? {});
@@ -118,7 +132,6 @@ export function loadConfig(configPath) {
                         grepMaxResults: grepData.max_results ?? config.tools.grepMaxResults,
                     };
                 }
-                // Load security config
                 if (data.security && typeof data.security === "object") {
                     const s = data.security;
                     config.security = {
@@ -126,7 +139,6 @@ export function loadConfig(configPath) {
                         allowSymlinks: s.allow_symlinks ?? config.security.allowSymlinks,
                     };
                 }
-                // Load logging config
                 if (data.logging && typeof data.logging === "object") {
                     const l = data.logging;
                     config.logging = {
@@ -136,10 +148,10 @@ export function loadConfig(configPath) {
                             config.logging.includeToolOutputs,
                     };
                 }
-                // Load web_fetch config
                 if (data.web_fetch && typeof data.web_fetch === "object") {
                     const wf = data.web_fetch;
                     config.webFetch = {
+                        defaultModel: wf.default_model ?? config.webFetch.defaultModel,
                         timeoutSeconds: wf.timeout_seconds ?? config.webFetch.timeoutSeconds,
                         maxContentChars: wf.max_content_chars ??
                             config.webFetch.maxContentChars,
@@ -150,10 +162,10 @@ export function loadConfig(configPath) {
                         userAgent: wf.user_agent ?? config.webFetch.userAgent,
                     };
                 }
-                // Load web_search config
                 if (data.web_search && typeof data.web_search === "object") {
                     const ws = data.web_search;
                     config.webSearch = {
+                        defaultModel: ws.default_model ?? config.webSearch.defaultModel,
                         maxResults: ws.max_results ?? config.webSearch.maxResults,
                         maxResponseTokens: ws.max_response_tokens ??
                             config.webSearch.maxResponseTokens,
@@ -167,9 +179,6 @@ export function loadConfig(configPath) {
     }
     return config;
 }
-/**
- * Get DeepSeek API key from environment
- */
 export function getApiKey() {
     const key = process.env.DEEPSEEK_API_KEY;
     if (!key) {
@@ -177,15 +186,11 @@ export function getApiKey() {
     }
     return key;
 }
-/**
- * Get DeepSeek API base URL from environment
- */
-export function getBaseUrl() {
-    return process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+export function getBaseUrl(strict = false) {
+    if (process.env.DEEPSEEK_BASE_URL)
+        return process.env.DEEPSEEK_BASE_URL;
+    return strict ? "https://api.deepseek.com/beta" : "https://api.deepseek.com";
 }
-/**
- * Get Brave Search API key from environment
- */
 export function getBraveApiKey() {
     return process.env.BRAVE_API_KEY;
 }

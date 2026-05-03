@@ -1,6 +1,6 @@
 {
   "name": "deepseek-agent-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server that delegates tasks from Claude to DeepSeek for 10-50x cost savings",
   "type": "module",
   "main": "dist/index.js",
@@ -12,7 +12,8 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

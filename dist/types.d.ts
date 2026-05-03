@@ -6,9 +6,13 @@ export interface ModelConfig {
     allowed: string[];
 }
 export interface AgentConfig {
+    defaultModel: string;
     maxIterations: number;
     timeoutSeconds: number;
     outputTruncateChars: number;
+}
+export interface ChatConfig {
+    defaultModel: string;
 }
 export interface BashConfig {
     defaultTimeout: number;
@@ -29,6 +33,7 @@ export interface LoggingConfig {
     includeToolOutputs: boolean;
 }
 export interface WebFetchConfig {
+    defaultModel: string;
     timeoutSeconds: number;
     maxContentChars: number;
     minContentChars: number;
@@ -36,17 +41,30 @@ export interface WebFetchConfig {
     userAgent: string;
 }
 export interface WebSearchConfig {
+    defaultModel: string;
     maxResults: number;
     maxResponseTokens: number;
 }
 export interface Config {
     model: ModelConfig;
     agent: AgentConfig;
+    chat: ChatConfig;
     tools: ToolsConfig;
     security: SecurityConfig;
     logging: LoggingConfig;
     webFetch: WebFetchConfig;
     webSearch: WebSearchConfig;
+}
+export interface ModelCallParams {
+    model?: string;
+    maxTokens?: number;
+    thinking?: boolean;
+    reasoningEffort?: "low" | "medium" | "high";
+}
+export interface AgentCallParams extends ModelCallParams {
+    maxIterations?: number;
+    timeoutSeconds?: number;
+    strictTools?: boolean;
 }
 export interface AgentResult {
     success: boolean;

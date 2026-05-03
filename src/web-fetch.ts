@@ -7,8 +7,9 @@
 
 import * as cheerio from "cheerio";
 import OpenAI from "openai";
-import type { FetchResult, WebFetchConfig } from "./types.js";
+import type { FetchResult, WebFetchConfig, ModelCallParams } from "./types.js";
 import { getApiKey, getBaseUrl } from "./config.js";
+import { buildExtraParams } from "./api-params.js";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -169,7 +170,8 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
 async function processWithDeepseek(
   content: string,
   prompt: string,
-  config: WebFetchConfig
+  config: WebFetchConfig,
+  modelParams: ModelCallParams,
 ): Promise<string> {
   const client = new OpenAI({
     apiKey: getApiKey(),
@@ -184,14 +186,27 @@ ${content}
 
 ${prompt}`;
 
-  const response = await client.chat.completions.create({
-    model: "deepseek-chat",
-    messages: [{ role: "user", content: fullPrompt }],
-    temperature: 0.1,
-    max_tokens: config.maxResponseTokens,
-  });
+  const model = modelParams.model ?? config.defaultModel;
+  // For web_fetch we apply a sensible default max_tokens unless caller overrides,
+  // since extraction tasks have a natural cap.
+  const effectiveParams: ModelCallParams = {
+    ...modelParams,
+    maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
+  };
+  const extra = buildExtraParams(effectiveParams);
 
-  return response.choices[0]?.message?.content ?? "";
+  const body = {
+    model,
+    messages: [{ role: "user" as const, content: fullPrompt }],
+    temperature: 0.1,
+    ...extra,
+  };
+
+  const response = await client.chat.completions.create(
+    body as unknown as Parameters<typeof client.chat.completions.create>[0],
+  );
+
+  return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
 }
 
 /**
@@ -200,9 +215,11 @@ ${prompt}`;
 export async function fetchAndProcess(
   url: string,
   prompt: string,
-  config?: Partial<WebFetchConfig>
+  config?: Partial<WebFetchConfig>,
+  modelParams: ModelCallParams = {},
 ): Promise<string> {
   const effectiveConfig: WebFetchConfig = {
+    defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
     timeoutSeconds: config?.timeoutSeconds ?? 15,
     maxContentChars: config?.maxContentChars ?? 50000,
     minContentChars: config?.minContentChars ?? 500,
@@ -236,7 +253,8 @@ export async function fetchAndProcess(
     const response = await processWithDeepseek(
       parseResult.content,
       prompt,
-      effectiveConfig
+      effectiveConfig,
+      modelParams,
     );
     const deepseekMs = Date.now() - deepseekStart;
     const totalMs = Date.now() - totalStart;
@@ -260,6 +278,7 @@ export async function fetchRaw(
   config?: Partial<WebFetchConfig>
 ): Promise<string> {
   const effectiveConfig: WebFetchConfig = {
+    defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
     timeoutSeconds: config?.timeoutSeconds ?? 15,
     maxContentChars: config?.maxContentChars ?? 50000,
     minContentChars: config?.minContentChars ?? 500,

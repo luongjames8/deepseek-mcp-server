@@ -7,6 +7,7 @@ import { join } from "path";
 import OpenAI from "openai";
 import { getApiKey, getBaseUrl, loadConfig } from "./config.js";
 import { TOOL_DEFINITIONS, ToolExecutor } from "./tools.js";
+import { buildExtraParams, validateModel } from "./api-params.js";
 const SYSTEM_PROMPT = `You are a coding agent with access to file, shell, and web tools. Execute the user's task precisely.
 
 ## Guidelines
@@ -50,22 +51,13 @@ When the task is complete, provide a brief summary:
 2. Files created/modified
 3. Any warnings or issues
 `;
-/**
- * Generate a unique task ID
- */
 function generateTaskId() {
     return randomUUID().slice(0, 8);
 }
-/**
- * Check if working_dir is a GSD-managed project
- */
 function detectGsdProject(workingDir) {
     const planningDir = join(workingDir, ".planning");
     return existsSync(planningDir);
 }
-/**
- * Load GSD context for system prompt enhancement
- */
 function getGsdContext(workingDir) {
     if (!detectGsdProject(workingDir)) {
         return "";
@@ -83,9 +75,6 @@ function getGsdContext(workingDir) {
     }
     return contextParts.join("\n\n");
 }
-/**
- * Extract partial progress from message history
- */
 function extractProgress(messages) {
     const progressParts = [];
     for (const msg of messages) {
@@ -101,11 +90,8 @@ function extractProgress(messages) {
     if (progressParts.length === 0) {
         return undefined;
     }
-    return progressParts.slice(-5).join("\n"); // Last 5 relevant messages
+    return progressParts.slice(-5).join("\n");
 }
-/**
- * Format agent result for MCP response
- */
 function formatResult(result) {
     if (result.success) {
         return result.content;
@@ -119,40 +105,36 @@ function formatResult(result) {
     }
     return output;
 }
-/**
- * DeepSeek Agent class
- */
 export class DeepSeekAgent {
     config;
-    client;
     constructor(config) {
         this.config = config ?? loadConfig();
-        this.client = new OpenAI({
-            apiKey: getApiKey(),
-            baseURL: getBaseUrl(),
-        });
     }
     /**
-     * Execute a task using the agentic loop
+     * Execute a task using the agentic loop.
+     * `params` is caller-supplied; anything omitted falls back to config defaults.
      */
-    async run(prompt, workingDir, model, maxIterations, timeoutSeconds) {
-        // Apply defaults from config
-        model = model ?? this.config.model.default;
-        maxIterations = maxIterations ?? this.config.agent.maxIterations;
-        timeoutSeconds = timeoutSeconds ?? this.config.agent.timeoutSeconds;
-        // Validate model
-        if (!this.config.model.allowed.includes(model)) {
+    async run(prompt, workingDir, params = {}) {
+        const model = params.model ?? this.config.agent.defaultModel;
+        const maxIterations = params.maxIterations ?? this.config.agent.maxIterations;
+        const timeoutSeconds = params.timeoutSeconds ?? this.config.agent.timeoutSeconds;
+        const validationError = validateModel(model, this.config.model.allowed);
+        if (validationError) {
             return {
                 success: false,
-                content: `Model '${model}' not in allowed list: ${this.config.model.allowed.join(", ")}`,
+                content: validationError,
                 iterationsUsed: 0,
                 errorType: "unknown",
             };
         }
-        const taskId = generateTaskId();
+        // Strict tools mode → use beta endpoint (per DeepSeek docs)
+        const client = new OpenAI({
+            apiKey: getApiKey(),
+            baseURL: getBaseUrl(params.strictTools ?? false),
+        });
+        const _taskId = generateTaskId();
         const startTime = Date.now();
         const toolsCalled = [];
-        // Build system prompt with optional GSD context
         let systemPrompt = SYSTEM_PROMPT;
         const gsdContext = getGsdContext(workingDir);
         if (gsdContext) {
@@ -163,17 +145,19 @@ export class DeepSeekAgent {
             { role: "user", content: prompt },
         ];
         const toolExecutor = new ToolExecutor(workingDir, this.config.tools, this.config.webSearch);
-        // Convert tool definitions to OpenAI format
-        const tools = TOOL_DEFINITIONS.map((t) => ({
-            type: "function",
-            function: {
+        const tools = TOOL_DEFINITIONS.map((t) => {
+            const fn = {
                 name: t.function.name,
                 description: t.function.description,
                 parameters: t.function.parameters,
-            },
-        }));
+            };
+            // Strict mode requires `strict: true` on each tool
+            if (params.strictTools) {
+                fn.strict = true;
+            }
+            return { type: "function", function: fn };
+        });
         for (let iteration = 0; iteration < maxIterations; iteration++) {
-            // Check timeout
             const elapsed = Date.now() - startTime;
             if (elapsed > timeoutSeconds * 1000) {
                 return {
@@ -185,10 +169,9 @@ export class DeepSeekAgent {
                     partialProgress: extractProgress(messages),
                 };
             }
-            // Call API with retry
             let response;
             try {
-                response = await this.callApiWithRetry(model, messages, tools);
+                response = await this.callApiWithRetry(client, model, messages, tools, params);
             }
             catch (e) {
                 const errorType = e instanceof Error && e.message.includes("rate")
@@ -215,7 +198,6 @@ export class DeepSeekAgent {
                     errorType: "unknown",
                 };
             }
-            // No tool calls = task complete
             if (!message.tool_calls || message.tool_calls.length === 0) {
                 return {
                     success: true,
@@ -224,7 +206,6 @@ export class DeepSeekAgent {
                     toolsCalled,
                 };
             }
-            // Process tool calls
             messages.push({
                 role: "assistant",
                 content: message.content,
@@ -260,7 +241,6 @@ export class DeepSeekAgent {
                 });
             }
         }
-        // Max iterations reached
         return {
             success: false,
             content: "Max iterations reached",
@@ -273,17 +253,19 @@ export class DeepSeekAgent {
     /**
      * Call DeepSeek API with exponential backoff retry
      */
-    async callApiWithRetry(model, messages, tools, maxRetries = 3) {
+    async callApiWithRetry(client, model, messages, tools, params, maxRetries = 3) {
         let lastError = null;
+        const extra = buildExtraParams(params);
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                return await this.client.chat.completions.create({
+                const body = {
                     model,
                     messages,
                     tools,
                     tool_choice: "auto",
-                    max_tokens: 8192,
-                });
+                    ...extra,
+                };
+                return await client.chat.completions.create(body);
             }
             catch (e) {
                 lastError = e instanceof Error ? e : new Error(String(e));
@@ -293,7 +275,7 @@ export class DeepSeekAgent {
                     errorMsg.includes("timeout") ||
                     errorMsg.includes("connection")) {
                     if (attempt < maxRetries - 1) {
-                        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+                        const delay = Math.pow(2, attempt) * 1000;
                         await new Promise((resolve) => setTimeout(resolve, delay));
                         continue;
                     }
@@ -304,15 +286,9 @@ export class DeepSeekAgent {
         throw lastError ?? new Error("API call failed after retries");
     }
 }
-/**
- * Convenience function to run the agent
- */
-export async function runAgent(prompt, workingDir, model = "deepseek-chat", maxIterations = 50, timeoutSeconds = 300) {
+export async function runAgent(prompt, workingDir, params = {}) {
     const agent = new DeepSeekAgent();
-    return agent.run(prompt, workingDir, model, maxIterations, timeoutSeconds);
+    return agent.run(prompt, workingDir, params);
 }
-/**
- * Format result for MCP response
- */
 export { formatResult };
 //# sourceMappingURL=agent.js.map

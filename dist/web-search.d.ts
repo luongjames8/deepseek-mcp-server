@@ -5,8 +5,8 @@
  * search snippets using DeepSeek. Fast and lightweight - use web_fetch
  * for deep dives on specific URLs.
  */
-import type { WebSearchConfig } from "./types.js";
+import type { WebSearchConfig, ModelCallParams } from "./types.js";
 /**
  * Main entry point: search and synthesize from snippets
  */
-export declare function searchAndSynthesize(query: string, config?: Partial<WebSearchConfig>): Promise<string>;
+export declare function searchAndSynthesize(query: string, config?: Partial<WebSearchConfig>, modelParams?: ModelCallParams): Promise<string>;

@@ -1,32 +1,20 @@
 /**
  * Agentic loop implementation for DeepSeek Agent
  */
-import type { AgentResult, Config } from "./types.js";
-/**
- * Format agent result for MCP response
- */
+import type { AgentResult, Config, AgentCallParams } from "./types.js";
 declare function formatResult(result: AgentResult): string;
-/**
- * DeepSeek Agent class
- */
 export declare class DeepSeekAgent {
     private config;
-    private client;
     constructor(config?: Config);
     /**
-     * Execute a task using the agentic loop
+     * Execute a task using the agentic loop.
+     * `params` is caller-supplied; anything omitted falls back to config defaults.
      */
-    run(prompt: string, workingDir: string, model?: string, maxIterations?: number, timeoutSeconds?: number): Promise<AgentResult>;
+    run(prompt: string, workingDir: string, params?: AgentCallParams): Promise<AgentResult>;
     /**
      * Call DeepSeek API with exponential backoff retry
      */
     private callApiWithRetry;
 }
-/**
- * Convenience function to run the agent
- */
-export declare function runAgent(prompt: string, workingDir: string, model?: string, maxIterations?: number, timeoutSeconds?: number): Promise<AgentResult>;
-/**
- * Format result for MCP response
- */
+export declare function runAgent(prompt: string, workingDir: string, params?: AgentCallParams): Promise<AgentResult>;
 export { formatResult };

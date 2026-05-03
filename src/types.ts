@@ -9,9 +9,14 @@ export interface ModelConfig {
 }
 
 export interface AgentConfig {
+  defaultModel: string;
   maxIterations: number;
   timeoutSeconds: number;
   outputTruncateChars: number;
+}
+
+export interface ChatConfig {
+  defaultModel: string;
 }
 
 export interface BashConfig {
@@ -37,6 +42,7 @@ export interface LoggingConfig {
 }
 
 export interface WebFetchConfig {
+  defaultModel: string;
   timeoutSeconds: number;
   maxContentChars: number;
   minContentChars: number;
@@ -45,6 +51,7 @@ export interface WebFetchConfig {
 }
 
 export interface WebSearchConfig {
+  defaultModel: string;
   maxResults: number;
   maxResponseTokens: number;
 }
@@ -52,11 +59,27 @@ export interface WebSearchConfig {
 export interface Config {
   model: ModelConfig;
   agent: AgentConfig;
+  chat: ChatConfig;
   tools: ToolsConfig;
   security: SecurityConfig;
   logging: LoggingConfig;
   webFetch: WebFetchConfig;
   webSearch: WebSearchConfig;
+}
+
+// Per-call model parameters that callers can override
+export interface ModelCallParams {
+  model?: string;
+  maxTokens?: number;
+  thinking?: boolean;
+  reasoningEffort?: "low" | "medium" | "high";
+}
+
+// Agent-specific call params (extends ModelCallParams)
+export interface AgentCallParams extends ModelCallParams {
+  maxIterations?: number;
+  timeoutSeconds?: number;
+  strictTools?: boolean;
 }
 
 // Agent result types

@@ -7,6 +7,7 @@
  */
 import OpenAI from "openai";
 import { getApiKey, getBaseUrl, getBraveApiKey } from "./config.js";
+import { buildExtraParams } from "./api-params.js";
 /**
  * Search using Brave Search API
  */
@@ -43,7 +44,7 @@ async function braveSearch(query, maxResults = 10) {
 /**
  * Synthesize search results using DeepSeek
  */
-async function synthesizeSnippets(query, searchResults, config) {
+async function synthesizeSnippets(query, searchResults, config, modelParams) {
     // Build context from snippets
     const contextParts = searchResults.map((sr) => `## Source: ${sr.title}\nURL: ${sr.url}\n\n${sr.snippet}\n`);
     const context = contextParts.join("\n---\n");
@@ -69,13 +70,20 @@ End your response with a "Sources:" section listing the relevant URLs.`;
         baseURL: getBaseUrl(),
     });
     try {
-        const response = await client.chat.completions.create({
-            model: "deepseek-chat",
+        const model = modelParams.model ?? config.defaultModel;
+        const effectiveParams = {
+            ...modelParams,
+            maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
+        };
+        const extra = buildExtraParams(effectiveParams);
+        const body = {
+            model,
             messages: [{ role: "user", content: prompt }],
             temperature: 0.1,
-            max_tokens: config.maxResponseTokens,
-        });
-        return response.choices[0]?.message?.content ?? "";
+            ...extra,
+        };
+        const response = await client.chat.completions.create(body);
+        return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
     }
     catch (e) {
         const errorMsg = String(e);
@@ -97,8 +105,9 @@ End your response with a "Sources:" section listing the relevant URLs.`;
 /**
  * Main entry point: search and synthesize from snippets
  */
-export async function searchAndSynthesize(query, config) {
+export async function searchAndSynthesize(query, config, modelParams = {}) {
     const effectiveConfig = {
+        defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
         maxResults: config?.maxResults ?? 10,
         maxResponseTokens: config?.maxResponseTokens ?? 8192,
     };
@@ -121,7 +130,7 @@ export async function searchAndSynthesize(query, config) {
         }
         // Step 2: Synthesize from snippets (no page fetching)
         const synthStart = Date.now();
-        const synthesis = await synthesizeSnippets(query, searchResults, effectiveConfig);
+        const synthesis = await synthesizeSnippets(query, searchResults, effectiveConfig, modelParams);
         const synthMs = Date.now() - synthStart;
         const totalMs = Date.now() - totalStart;
         // Format response

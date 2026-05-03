@@ -7,6 +7,7 @@
 import * as cheerio from "cheerio";
 import OpenAI from "openai";
 import { getApiKey, getBaseUrl } from "./config.js";
+import { buildExtraParams } from "./api-params.js";
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 /**
  * Fetch URL content using native fetch
@@ -142,7 +143,7 @@ function parseHtml(html, config) {
 /**
  * Send content to DeepSeek for processing
  */
-async function processWithDeepseek(content, prompt, config) {
+async function processWithDeepseek(content, prompt, config, modelParams) {
     const client = new OpenAI({
         apiKey: getApiKey(),
         baseURL: getBaseUrl(),
@@ -154,19 +155,29 @@ ${content}
 ---
 
 ${prompt}`;
-    const response = await client.chat.completions.create({
-        model: "deepseek-chat",
+    const model = modelParams.model ?? config.defaultModel;
+    // For web_fetch we apply a sensible default max_tokens unless caller overrides,
+    // since extraction tasks have a natural cap.
+    const effectiveParams = {
+        ...modelParams,
+        maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
+    };
+    const extra = buildExtraParams(effectiveParams);
+    const body = {
+        model,
         messages: [{ role: "user", content: fullPrompt }],
         temperature: 0.1,
-        max_tokens: config.maxResponseTokens,
-    });
-    return response.choices[0]?.message?.content ?? "";
+        ...extra,
+    };
+    const response = await client.chat.completions.create(body);
+    return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
 }
 /**
  * Main entry point: fetch URL, parse HTML, process with DeepSeek
  */
-export async function fetchAndProcess(url, prompt, config) {
+export async function fetchAndProcess(url, prompt, config, modelParams = {}) {
     const effectiveConfig = {
+        defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
         timeoutSeconds: config?.timeoutSeconds ?? 15,
         maxContentChars: config?.maxContentChars ?? 50000,
         minContentChars: config?.minContentChars ?? 500,
@@ -191,7 +202,7 @@ export async function fetchAndProcess(url, prompt, config) {
     // Step 3: Process with DeepSeek
     try {
         const deepseekStart = Date.now();
-        const response = await processWithDeepseek(parseResult.content, prompt, effectiveConfig);
+        const response = await processWithDeepseek(parseResult.content, prompt, effectiveConfig, modelParams);
         const deepseekMs = Date.now() - deepseekStart;
         const totalMs = Date.now() - totalStart;
         return `[web_fetch: ${url}]
@@ -210,6 +221,7 @@ ${response}`;
  */
 export async function fetchRaw(url, config) {
     const effectiveConfig = {
+        defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
         timeoutSeconds: config?.timeoutSeconds ?? 15,
         maxContentChars: config?.maxContentChars ?? 50000,
         minContentChars: config?.minContentChars ?? 500,

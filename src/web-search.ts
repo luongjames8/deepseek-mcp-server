@@ -7,8 +7,9 @@
  */
 
 import OpenAI from "openai";
-import type { SearchResult, WebSearchConfig } from "./types.js";
+import type { SearchResult, WebSearchConfig, ModelCallParams } from "./types.js";
 import { getApiKey, getBaseUrl, getBraveApiKey } from "./config.js";
+import { buildExtraParams } from "./api-params.js";
 
 /**
  * Search using Brave Search API
@@ -64,7 +65,8 @@ async function braveSearch(
 async function synthesizeSnippets(
   query: string,
   searchResults: SearchResult[],
-  config: WebSearchConfig
+  config: WebSearchConfig,
+  modelParams: ModelCallParams,
 ): Promise<string> {
   // Build context from snippets
   const contextParts = searchResults.map(
@@ -96,14 +98,25 @@ End your response with a "Sources:" section listing the relevant URLs.`;
   });
 
   try {
-    const response = await client.chat.completions.create({
-      model: "deepseek-chat",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.1,
-      max_tokens: config.maxResponseTokens,
-    });
+    const model = modelParams.model ?? config.defaultModel;
+    const effectiveParams: ModelCallParams = {
+      ...modelParams,
+      maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
+    };
+    const extra = buildExtraParams(effectiveParams);
 
-    return response.choices[0]?.message?.content ?? "";
+    const body = {
+      model,
+      messages: [{ role: "user" as const, content: prompt }],
+      temperature: 0.1,
+      ...extra,
+    };
+
+    const response = await client.chat.completions.create(
+      body as unknown as Parameters<typeof client.chat.completions.create>[0],
+    );
+
+    return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
   } catch (e) {
     const errorMsg = String(e);
 
@@ -132,9 +145,11 @@ End your response with a "Sources:" section listing the relevant URLs.`;
  */
 export async function searchAndSynthesize(
   query: string,
-  config?: Partial<WebSearchConfig>
+  config?: Partial<WebSearchConfig>,
+  modelParams: ModelCallParams = {},
 ): Promise<string> {
   const effectiveConfig: WebSearchConfig = {
+    defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
     maxResults: config?.maxResults ?? 10,
     maxResponseTokens: config?.maxResponseTokens ?? 8192,
   };
@@ -164,7 +179,7 @@ export async function searchAndSynthesize(
 
     // Step 2: Synthesize from snippets (no page fetching)
     const synthStart = Date.now();
-    const synthesis = await synthesizeSnippets(query, searchResults, effectiveConfig);
+    const synthesis = await synthesizeSnippets(query, searchResults, effectiveConfig, modelParams);
     const synthMs = Date.now() - synthStart;
 
     const totalMs = Date.now() - totalStart;

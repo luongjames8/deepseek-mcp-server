@@ -1,42 +1,60 @@
 # DeepSeek Agent MCP Server Configuration
 
-# Model settings
+# Allowed models (validated against this allowlist)
+# Legacy aliases (deepseek-chat, deepseek-reasoner) deprecated 2026-07-24
 model:
-  default: "deepseek-chat"          # Default model for tasks
-  allowed:                           # Allowlist of models
-    - "deepseek-chat"
-    - "deepseek-reasoner"
+  allowed:
+    - "deepseek-v4-pro"
+    - "deepseek-v4-flash"
+    - "deepseek-chat"          # legacy, deprecated 2026-07-24
+    - "deepseek-reasoner"      # legacy, deprecated 2026-07-24
 
-# Agent limits
+# deepseek_agent — full agentic loop with file/shell/web tools
+# Default to Pro: real work being delegated, pay for quality
 agent:
-  max_iterations: 50                 # Max tool call loops per task
-  timeout_seconds: 300               # Overall task timeout (5 minutes)
-  output_truncate_chars: 50000       # Max chars per tool output
+  default_model: "deepseek-v4-pro"
+  max_iterations: 50
+  timeout_seconds: 300
+  output_truncate_chars: 50000
 
-# Tool-specific settings
+# deepseek_chat — single-turn chat, no tools
+# Default to Pro: explicit "ask deepseek a question" → want the better brain
+chat:
+  default_model: "deepseek-v4-pro"
+
+# web_search — Brave search + DeepSeek synthesis from snippets
+# Default to Flash: high call volume, summarization is cheap work
+web_search:
+  default_model: "deepseek-v4-flash"
+  max_results: 10
+  max_response_tokens: 8192
+
+# web_fetch — fetch URL + extract with DeepSeek
+# Default to Flash: extraction from already-fetched content is cheap work
+web_fetch:
+  default_model: "deepseek-v4-flash"
+  timeout_seconds: 15
+  max_content_chars: 50000
+  min_content_chars: 500
+  max_response_tokens: 8192
+
+# Tool-specific settings (for inner agent tools)
 tools:
   bash:
-    default_timeout: 120             # Seconds per command
-    max_timeout: 600                 # Maximum allowed timeout (10 minutes)
+    default_timeout: 120
+    max_timeout: 600
   glob:
-    max_results: 100                 # Max files returned
+    max_results: 100
   grep:
-    max_results: 100                 # Max matches returned
+    max_results: 100
 
 # Security
 security:
-  working_dir: null                  # Override working_dir (null = use param)
-  allow_symlinks: false              # Follow symlinks outside sandbox
+  working_dir: null
+  allow_symlinks: false
 
 # Logging
 logging:
-  level: "DEBUG"                     # DEBUG, INFO, WARNING, ERROR
-  file: "deepseek-agent.log"         # Log file path (null = stderr only)
-  include_tool_outputs: true         # Log full tool outputs
-
-# Web fetch tool settings
-web_fetch:
-  timeout_seconds: 15                # HTTP request timeout
-  max_content_chars: 50000           # Truncate content over this limit
-  min_content_chars: 500             # Error if content shorter (likely JS-rendered)
-  max_response_tokens: 4000          # Max DeepSeek response tokens
+  level: "INFO"
+  file: "deepseek-agent.log"
+  include_tool_outputs: true

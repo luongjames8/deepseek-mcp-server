@@ -170,6 +170,7 @@ export class ToolExecutor {
       grepMaxResults: 100,
     };
     this.webSearchConfig = webSearchConfig ?? {
+      defaultModel: "deepseek-v4-flash",
       maxResults: 10,
       maxResponseTokens: 8192,
     };

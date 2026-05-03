@@ -4,11 +4,11 @@
  * Fetches URLs, parses HTML to clean text, and processes with DeepSeek.
  * Drop-in replacement for Claude's WebFetch tool, but cheaper.
  */
-import type { WebFetchConfig } from "./types.js";
+import type { WebFetchConfig, ModelCallParams } from "./types.js";
 /**
  * Main entry point: fetch URL, parse HTML, process with DeepSeek
  */
-export declare function fetchAndProcess(url: string, prompt: string, config?: Partial<WebFetchConfig>): Promise<string>;
+export declare function fetchAndProcess(url: string, prompt: string, config?: Partial<WebFetchConfig>, modelParams?: ModelCallParams): Promise<string>;
 /**
  * Fetch URL and return raw extracted text (no DeepSeek processing).
  * Used for content verification where exact text matching is needed.

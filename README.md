@@ -1,77 +1,69 @@
 # DeepSeek MCP Server
 
-An MCP (Model Context Protocol) server that lets Claude Code delegate tasks to DeepSeek, saving you **10-50x on API costs** for routine coding tasks.
+An MCP (Model Context Protocol) server that lets Claude Code delegate tasks to DeepSeek, saving you **10-100x on API costs** for routine work.
 
 ## Why This Exists
 
-**The Problem:** Claude is expensive. Running Claude Opus for every file read, code generation, or refactoring task adds up fast.
+**Problem:** Claude is expensive. Running Sonnet/Opus for every file read, web fetch, or code-gen task adds up fast.
 
-**The Solution:** Delegate routine tasks to DeepSeek (which costs ~$0.14/M input tokens vs Claude's $3-15/M) while keeping Claude for complex reasoning and coordination.
+**Solution:** Delegate routine work to DeepSeek (~$0.14/M input tokens vs Claude's $3-15/M) while keeping Claude for orchestration and complex reasoning.
 
-### Cost Comparison
+### Cost Comparison (per 1M tokens, cache miss)
 
-| Model | Input (per 1M tokens) | Output (per 1M tokens) |
-|-------|----------------------|------------------------|
+| Model | Input | Output |
+|-------|-------|--------|
 | Claude Opus | $15.00 | $75.00 |
 | Claude Sonnet | $3.00 | $15.00 |
-| **DeepSeek Chat** | **$0.14** | **$0.28** |
-| DeepSeek Reasoner | $0.55 | $2.19 |
+| **DeepSeek v4 Pro** | **$1.74** ($0.435 promo through 2026-05-31) | **$3.48** ($0.87 promo) |
+| **DeepSeek v4 Flash** | **$0.14** | **$0.28** |
 
-**Real example:** A coding session with 50 file operations might cost $5-10 with Claude. With DeepSeek handling the file operations: **~$0.20**.
+Both v4 models support **1M context**, **384K max output**, and **thinking mode on by default**. Cache hits are 1/10th the input price.
 
 ## Features
 
-This MCP server provides **4 tools** to Claude:
+Five tools, each with caller-overridable model parameters:
 
-### 1. `deepseek_agent` - Agentic File Operations
-Full coding agent with tool access. Use for tasks requiring file system interaction.
+| Tool | What it does | Default model | Why |
+|------|--------------|---------------|-----|
+| `deepseek_agent` | Agentic loop: file/shell/web tools | `deepseek-v4-pro` | Real work being delegated — pay for quality |
+| `deepseek_chat` | Single-turn chat, no tools | `deepseek-v4-pro` | Explicit "ask deepseek" — want the better brain |
+| `web_fetch` | Fetch URL + extract with DeepSeek | `deepseek-v4-flash` | High call volume; extraction is cheap work |
+| `web_fetch_raw` | Fetch URL, return raw text (no AI) | n/a | Cheapest — for verification |
+| `web_search` | Brave search + DeepSeek synthesis | `deepseek-v4-flash` | High call volume; summarization is cheap work |
 
-**Sub-tools available:**
-- `read_file` - Read file contents
-- `write_file` - Create/overwrite files
-- `edit_file` - Find-and-replace in files
-- `run_bash` - Execute shell commands
-- `glob` - Find files by pattern
-- `grep` - Search file contents
-- `list_dir` - List directory contents
-- `web_search` - Search the web (requires Brave API key)
+### Caller-overridable parameters
 
-**Example:**
-```
-Use deepseek_agent to refactor all the error handling in src/ to use a custom AppError class
-```
+Every tool that calls a model accepts these optional args:
 
-### 2. `deepseek_chat` - Fast Chat Completion
-Simple prompt → response. No tools, no overhead. Use for analysis, explanations, code review.
+| Param | Type | Effect |
+|-------|------|--------|
+| `model` | string | Override the per-tool default |
+| `max_tokens` | int | Cap output (omit → API decides; v4 supports 384K) |
+| `thinking` | bool | `false` to disable thinking mode (faster, cheaper) |
+| `reasoning_effort` | `"low"` \| `"medium"` \| `"high"` | How hard to think when thinking is on |
 
-**Example:**
-```
-Use deepseek_chat to explain what this regex does: ^(?=.*[A-Z])(?=.*\d).{8,}$
-```
+`deepseek_agent` additionally accepts:
+- `max_iterations` — tool-call loop cap
+- `timeout_seconds` — overall timeout
+- `strict_tools` — Beta: route to `api.deepseek.com/beta` and enforce JSON-schema-strict tool args
 
-### 3. `web_fetch` - Fetch & Analyze Web Pages
-Fetches a URL, extracts content, answers questions about it. Cheaper than Claude's built-in WebFetch.
+### Sub-tools available to `deepseek_agent`
 
-**Example:**
-```
-Use web_fetch to get the main features from https://docs.python.org/3/whatsnew/3.12.html
-```
+`read_file`, `write_file`, `edit_file`, `run_bash`, `glob`, `grep`, `list_dir`, `web_search`
 
-### 4. `web_search` - Web Search with Synthesis
-Searches Brave, synthesizes results with DeepSeek. Requires `BRAVE_API_KEY`.
+## Model notes
 
-**Example:**
-```
-Use web_search to find the latest TypeScript 5.4 features
-```
+- **`deepseek-v4-pro`** and **`deepseek-v4-flash`** are the current generation. Both have thinking mode on by default — the response includes a `reasoning_content` field unless you pass `thinking: false`.
+- Legacy aliases **`deepseek-chat`** and **`deepseek-reasoner`** are supported but **deprecated 2026-07-24** by DeepSeek. They map to v4-flash non-thinking / v4-flash thinking respectively.
+- Pro is currently discounted ~75% (through 2026-05-31). After that it's ~6-12x Flash, but still cheaper than Sonnet.
 
 ## Installation
 
 ### Prerequisites
-- **Node.js 20+** - [Download](https://nodejs.org/)
-- **Claude Code CLI** - [Installation guide](https://docs.anthropic.com/en/docs/claude-code)
-- **DeepSeek API key** (required) - [Get one here](https://platform.deepseek.com/api_keys) (~$0.14/M tokens)
-- **Brave Search API key** (optional, for web_search) - [Get one here](https://brave.com/search/api/) (free tier available)
+- **Node.js 20+**
+- **Claude Code CLI**
+- **DeepSeek API key** — [Get one here](https://platform.deepseek.com/api_keys)
+- **Brave Search API key** (optional, for `web_search`) — [Get one here](https://brave.com/search/api/)
 
 ### Step 1: Clone and Build
 
@@ -84,165 +76,119 @@ npm run build
 
 ### Step 2: Configure Claude Code
 
-Edit your Claude config file:
-
-**Location:**
-- Windows: `%USERPROFILE%\.claude.json`
-- Mac/Linux: `~/.claude.json`
-
-Add to the `mcpServers` section:
+Add to the `mcpServers` section of `~/.claude.json`:
 
 ```json
 {
   "mcpServers": {
-    "deepseek": {
+    "deepseek-agent": {
       "command": "node",
       "args": ["/absolute/path/to/deepseek-mcp-server/dist/index.js"],
       "env": {
-        "DEEPSEEK_API_KEY": "your-deepseek-api-key"
+        "DEEPSEEK_API_KEY": "your-deepseek-api-key",
+        "BRAVE_API_KEY": "your-brave-api-key"
       }
     }
   }
 }
 ```
 
-**Important:** Use the absolute path to `dist/index.js`. Examples:
-- Windows: `"C:/Users/YourName/deepseek-mcp-server/dist/index.js"`
-- Mac: `"/Users/yourname/deepseek-mcp-server/dist/index.js"`
-- Linux: `"/home/yourname/deepseek-mcp-server/dist/index.js"`
-
-**Optional:** Add Brave API key for web search:
-```json
-"env": {
-  "DEEPSEEK_API_KEY": "your-deepseek-api-key",
-  "BRAVE_API_KEY": "your-brave-api-key"
-}
-```
-
 ### Step 3: Restart Claude Code
 
-Run `/mcp` in Claude Code to restart the MCP servers. You should see `deepseek` in the list.
+Run `/mcp` to confirm `deepseek-agent` is connected.
 
-### Alternative: Environment File
+### Alternative: `.env` file
 
-Instead of putting keys in `~/.claude.json`, create a `.env` file in the project:
+Instead of putting keys in `~/.claude.json`:
 
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
 ```
 
-## Usage
+The server searches for `.env` in cwd, project root, and `$HOME` in that order.
 
-Once installed, Claude can use the tools directly:
+## Usage examples
 
 ```
-# File operations
-Use deepseek_agent to read all .ts files in src/ and add JSDoc comments to exported functions
+# File operations (defaults to v4-pro)
+Use deepseek_agent to add JSDoc to all exported functions in src/
 
-# Quick questions
-Use deepseek_chat to explain the difference between Promise.all and Promise.allSettled
+# Cheap, single-turn (defaults to v4-pro)
+Use deepseek_chat to explain Promise.all vs Promise.allSettled
 
-# Web research
-Use web_fetch to summarize https://react.dev/blog/2024/02/15/react-labs-what-we-have-been-working-on-february-2024
+# Web fetch (defaults to v4-flash)
+Use web_fetch on https://react.dev/blog/... to summarize the post
 
-# Web search
-Use web_search for "Node.js 22 new features"
+# Override the default to use Pro for a fetch
+web_fetch with url=https://x.com/... model=deepseek-v4-pro
+
+# Disable thinking for a fast, cheap chat
+deepseek_chat with prompt="..." thinking=false
 ```
-
-### Recommended Workflow
-
-1. **Use Claude for:** Planning, architecture decisions, complex debugging, multi-step coordination
-2. **Delegate to DeepSeek for:** File reading/writing, code generation, refactoring, simple explanations, web fetching
-
-### Tool Selection Guide
-
-| Task | Tool | Why |
-|------|------|-----|
-| Read/write files | `deepseek_agent` | Full file system access |
-| Generate boilerplate | `deepseek_agent` | Can write files directly |
-| Explain code | `deepseek_chat` | Fast, no overhead |
-| Code review | `deepseek_chat` | Analysis only |
-| Fetch documentation | `web_fetch` | Cheaper than Claude |
-| Research current topics | `web_search` | Real-time web access |
 
 ## Configuration
 
-Edit `config.yaml` to customize behavior:
+`config.yaml` sets per-tool defaults. All values can be overridden per-call.
 
 ```yaml
-# Model settings
 model:
-  default: "deepseek-chat"
   allowed:
-    - "deepseek-chat"
-    - "deepseek-reasoner"  # Better for complex reasoning
+    - "deepseek-v4-pro"
+    - "deepseek-v4-flash"
+    - "deepseek-chat"          # legacy, deprecated 2026-07-24
+    - "deepseek-reasoner"      # legacy, deprecated 2026-07-24
 
-# Agent limits
 agent:
-  max_iterations: 50       # Max tool calls per task
-  timeout_seconds: 300     # 5 minute timeout
+  default_model: "deepseek-v4-pro"
+  max_iterations: 50
+  timeout_seconds: 300
 
-# Tool settings
-tools:
-  bash:
-    default_timeout: 120   # 2 minutes per command
-    max_timeout: 600       # 10 minute max
+chat:
+  default_model: "deepseek-v4-pro"
+
+web_search:
+  default_model: "deepseek-v4-flash"
+  max_results: 10
+
+web_fetch:
+  default_model: "deepseek-v4-flash"
+  timeout_seconds: 15
+  max_content_chars: 50000
 ```
+
+## Tests
+
+```bash
+npm test
+```
+
+21 tests run in ~4s:
+- **Unit** — config loading, parameter translation, validation (mocked, no API).
+- **Smoke** — 4 real DeepSeek API calls (~$0.005 per run) verifying v4-pro/flash respond, thinking-on-by-default works, `thinking: false` opts out.
+
+Smoke tests skip cleanly if `DEEPSEEK_API_KEY` is unset, but unit tests still run.
 
 ## Limitations
 
-### What DeepSeek is Good At
-- Routine file operations
-- Code generation from clear specs
-- Refactoring with explicit instructions
-- Answering factual questions
-- Summarizing content
-
-### What Claude is Better At
-- Complex multi-step reasoning
-- Ambiguous requirements
-- Architecture decisions
-- Nuanced code review
-- Tasks requiring judgment
-
-### Technical Limitations
-- **Path sandboxing:** File operations are restricted to the working directory
-- **No interactive commands:** Can't run commands that require user input
-- **Web search latency:** 10-30 seconds (Brave API + synthesis)
-- **Context limits:** DeepSeek has smaller context than Claude
+- **Path sandboxing**: agent file ops restricted to working directory.
+- **No interactive commands**: agent can't run anything that needs stdin.
+- **Web search latency**: 10-30s (Brave + synthesis).
 
 ## Troubleshooting
 
-### "DEEPSEEK_API_KEY is required"
-Set the API key in `~/.claude.json` env section or in `.env` file.
+**"DEEPSEEK_API_KEY is required"** — Set in `~/.claude.json` env, or `.env` file.
 
-### Tools not appearing in Claude
-1. Check `/mcp` output for errors
-2. Verify the `cwd` path is correct and absolute
-3. Make sure `npm run build` completed successfully
+**Tools not appearing** — `/mcp` output should show `deepseek-agent` connected. Verify the absolute path and that `npm run build` succeeded.
 
-### "Path escape attempt blocked"
-The agent tried to access files outside the working directory. This is a security feature.
-
-### Slow web_search
-Web search has inherent latency (10-30s). For faster results:
-- Use `web_fetch` if you know the exact URL
-- Use Claude's built-in WebSearch for time-sensitive queries
+**Old behavior persisting** — If you previously installed via npm, the `node_modules` copy may shadow your changes. Either reinstall or symlink: `ln -sfn /path/to/deepseek-mcp-server node_modules/deepseek-mcp-server`.
 
 ## Security
 
-- **Path sandboxing:** All file operations are restricted to the specified working directory
-- **No credential storage:** API keys are passed via environment variables
-- **No network access from agent tools:** Only explicit web_fetch/web_search can access the internet
+- File operations sandboxed to working directory.
+- API keys via environment variables only — never logged.
+- Agent's web access limited to explicit `web_search` / `web_fetch` calls.
 
 ## License
 
 MIT
-
-## Contributing
-
-PRs welcome! Please ensure:
-1. `npm run build` succeeds
-2. Test all 4 tools manually
-3. Update README if adding features

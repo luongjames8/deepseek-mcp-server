@@ -27,13 +27,22 @@ for (const envPath of envPaths) {
 // Default configuration
 const DEFAULT_CONFIG: Config = {
   model: {
-    default: "deepseek-chat",
-    allowed: ["deepseek-chat", "deepseek-reasoner"],
+    default: "deepseek-v4-pro",
+    allowed: [
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+      "deepseek-chat",
+      "deepseek-reasoner",
+    ],
   },
   agent: {
+    defaultModel: "deepseek-v4-pro",
     maxIterations: 50,
     timeoutSeconds: 300,
     outputTruncateChars: 50000,
+  },
+  chat: {
+    defaultModel: "deepseek-v4-pro",
   },
   tools: {
     bash: {
@@ -53,6 +62,7 @@ const DEFAULT_CONFIG: Config = {
     includeToolOutputs: true,
   },
   webFetch: {
+    defaultModel: "deepseek-v4-flash",
     timeoutSeconds: 15,
     maxContentChars: 50000,
     minContentChars: 500,
@@ -61,6 +71,7 @@ const DEFAULT_CONFIG: Config = {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   },
   webSearch: {
+    defaultModel: "deepseek-v4-flash",
     maxResults: 10,
     maxResponseTokens: 8192,
   },
@@ -70,9 +81,8 @@ const DEFAULT_CONFIG: Config = {
  * Load configuration from YAML file or use defaults
  */
 export function loadConfig(configPath?: string): Config {
-  let config = structuredClone(DEFAULT_CONFIG);
+  const config = structuredClone(DEFAULT_CONFIG);
 
-  // Search for config file
   if (!configPath) {
     const searchPaths = [
       join(process.cwd(), "config.yaml"),
@@ -93,7 +103,6 @@ export function loadConfig(configPath?: string): Config {
       const data = yaml.load(content) as Record<string, unknown>;
 
       if (data) {
-        // Load model config
         if (data.model && typeof data.model === "object") {
           const m = data.model as Record<string, unknown>;
           config.model = {
@@ -102,10 +111,11 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load agent config
         if (data.agent && typeof data.agent === "object") {
           const a = data.agent as Record<string, unknown>;
           config.agent = {
+            defaultModel:
+              (a.default_model as string) ?? config.agent.defaultModel,
             maxIterations:
               (a.max_iterations as number) ?? config.agent.maxIterations,
             timeoutSeconds:
@@ -116,7 +126,14 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load tools config
+        if (data.chat && typeof data.chat === "object") {
+          const c = data.chat as Record<string, unknown>;
+          config.chat = {
+            defaultModel:
+              (c.default_model as string) ?? config.chat.defaultModel,
+          };
+        }
+
         if (data.tools && typeof data.tools === "object") {
           const t = data.tools as Record<string, unknown>;
           const bashData = (t.bash ?? {}) as Record<string, unknown>;
@@ -138,7 +155,6 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load security config
         if (data.security && typeof data.security === "object") {
           const s = data.security as Record<string, unknown>;
           config.security = {
@@ -148,7 +164,6 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load logging config
         if (data.logging && typeof data.logging === "object") {
           const l = data.logging as Record<string, unknown>;
           config.logging = {
@@ -160,10 +175,11 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load web_fetch config
         if (data.web_fetch && typeof data.web_fetch === "object") {
           const wf = data.web_fetch as Record<string, unknown>;
           config.webFetch = {
+            defaultModel:
+              (wf.default_model as string) ?? config.webFetch.defaultModel,
             timeoutSeconds:
               (wf.timeout_seconds as number) ?? config.webFetch.timeoutSeconds,
             maxContentChars:
@@ -179,10 +195,11 @@ export function loadConfig(configPath?: string): Config {
           };
         }
 
-        // Load web_search config
         if (data.web_search && typeof data.web_search === "object") {
           const ws = data.web_search as Record<string, unknown>;
           config.webSearch = {
+            defaultModel:
+              (ws.default_model as string) ?? config.webSearch.defaultModel,
             maxResults:
               (ws.max_results as number) ?? config.webSearch.maxResults,
             maxResponseTokens:
@@ -199,9 +216,6 @@ export function loadConfig(configPath?: string): Config {
   return config;
 }
 
-/**
- * Get DeepSeek API key from environment
- */
 export function getApiKey(): string {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) {
@@ -210,16 +224,11 @@ export function getApiKey(): string {
   return key;
 }
 
-/**
- * Get DeepSeek API base URL from environment
- */
-export function getBaseUrl(): string {
-  return process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+export function getBaseUrl(strict: boolean = false): string {
+  if (process.env.DEEPSEEK_BASE_URL) return process.env.DEEPSEEK_BASE_URL;
+  return strict ? "https://api.deepseek.com/beta" : "https://api.deepseek.com";
 }
 
-/**
- * Get Brave Search API key from environment
- */
 export function getBraveApiKey(): string | undefined {
   return process.env.BRAVE_API_KEY;
 }
