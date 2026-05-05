@@ -15,8 +15,16 @@ import { fileURLToPath } from "url";
 import { config as dotenvConfig } from "dotenv";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Pull keys from project-root .env if not already in env
-dotenvConfig({ path: join(__dirname, "..", ".env") });
+// Same lookup chain as src/config.ts — XDG canonical wins.
+const xdgConfigHome =
+  process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
+const envPathCandidates = [
+  join(xdgConfigHome, "deepseek", "config.env"),
+  join(__dirname, "..", ".env"),
+];
+for (const p of envPathCandidates) {
+  dotenvConfig({ path: p });
+}
 
 const CLI = join(__dirname, "..", "dist", "cli.js");
 const HAS_KEY = !!process.env.DEEPSEEK_API_KEY;

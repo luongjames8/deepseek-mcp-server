@@ -112,7 +112,7 @@ const program = new Command();
 program
   .name("deepseek")
   .description("Streaming DeepSeek CLI — single-call primitives Claude can orchestrate")
-  .version("2.0.1");
+  .version("2.0.2");
 
 // chat
 addModelOpts(

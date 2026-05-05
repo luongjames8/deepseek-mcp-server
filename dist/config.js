@@ -7,7 +7,13 @@ import { fileURLToPath } from "url";
 import yaml from "js-yaml";
 import { config as dotenvConfig } from "dotenv";
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// Lookup chain for the secrets .env, in priority order.
+// XDG-canonical location wins so the CLI works in any shell session
+// without needing per-session sourcing or env-var inlining.
+const xdgConfigHome = process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
 const envPaths = [
+    join(xdgConfigHome, "deepseek", "config.env"),
+    join(process.env.HOME || "", ".config", "deepseek", "config.env"),
     join(process.cwd(), ".env"),
     join(__dirname, "..", ".env"),
     join(process.env.HOME || "", ".env"),
@@ -112,7 +118,8 @@ export function loadConfig(configPath) {
 export function getApiKey() {
     const key = process.env.DEEPSEEK_API_KEY;
     if (!key) {
-        throw new Error("DEEPSEEK_API_KEY environment variable is required");
+        throw new Error("DEEPSEEK_API_KEY not set. Either export it in your shell, or write it to " +
+            "~/.config/deepseek/config.env (mode 600). The CLI auto-loads from there.");
     }
     return key;
 }
