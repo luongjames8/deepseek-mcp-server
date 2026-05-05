@@ -1,6 +1,6 @@
 {
   "name": "deepseek-cli",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Streaming DeepSeek CLI with caller-overridable thinking/model/effort. Replaces the deepseek-agent-mcp pattern with a CLI Claude orchestrates directly.",
   "type": "module",
   "main": "dist/cli.js",

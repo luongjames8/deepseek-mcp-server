@@ -84,8 +84,14 @@ async function readStdin(): Promise<string> {
 }
 
 async function resolvePrompt(positional: string | undefined): Promise<string> {
-  if (positional && positional.trim().length > 0) return positional;
+  // Read stdin first if it's not a TTY, so arg + pipe can be combined.
+  // The natural shape is: arg = instruction, stdin = data.
+  //   echo "$data" | deepseek chat "Extract TODOs from this:"
+  // resolves to: "Extract TODOs from this:\n\n<data>"
   const piped = await readStdin();
+  const arg = positional?.trim() ?? "";
+  if (arg && piped) return `${arg}\n\n${piped}`;
+  if (arg) return arg;
   if (piped) return piped;
   throw new Error("No prompt provided. Pass as argument or pipe via stdin.");
 }
@@ -106,7 +112,7 @@ const program = new Command();
 program
   .name("deepseek")
   .description("Streaming DeepSeek CLI — single-call primitives Claude can orchestrate")
-  .version("2.0.0");
+  .version("2.0.1");
 
 // chat
 addModelOpts(

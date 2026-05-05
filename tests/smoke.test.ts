@@ -82,6 +82,24 @@ describeIfKey("smoke: deepseek CLI", () => {
     expect(r.stdout.trim().toLowerCase()).toContain("hi");
   });
 
+  it("chat merges positional arg + stdin (arg = instruction, stdin = data)", () => {
+    // Regression: pre-2.0.1, stdin was silently discarded when an arg was present,
+    // breaking every documented "extract X from this file" pattern.
+    const r = runCli(
+      [
+        "chat",
+        "What is the secret word in the input below? Reply with only the word.",
+        "--thinking",
+        "false",
+        "--max-tokens",
+        "20",
+      ],
+      "The secret word is BANANA.",
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout.toUpperCase()).toContain("BANANA");
+  });
+
   it("chat --model deepseek-v4-flash works", () => {
     const r = runCli([
       "chat",
