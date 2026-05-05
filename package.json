@@ -8,7 +8,7 @@
     "deepseek": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli.js",
     "start": "node dist/cli.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
