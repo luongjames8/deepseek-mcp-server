@@ -1,60 +1,34 @@
-# DeepSeek Agent MCP Server Configuration
+# DeepSeek CLI configuration
+#
+# Per-subcommand defaults. Every value is overridable per-call via flags
+# (--model, --max-tokens, --thinking, --reasoning-effort).
+#
+# Legacy aliases (deepseek-chat, deepseek-reasoner) deprecated 2026-07-24.
 
-# Allowed models (validated against this allowlist)
-# Legacy aliases (deepseek-chat, deepseek-reasoner) deprecated 2026-07-24
 model:
   allowed:
     - "deepseek-v4-pro"
     - "deepseek-v4-flash"
-    - "deepseek-chat"          # legacy, deprecated 2026-07-24
-    - "deepseek-reasoner"      # legacy, deprecated 2026-07-24
+    - "deepseek-chat"
+    - "deepseek-reasoner"
 
-# deepseek_agent — full agentic loop with file/shell/web tools
-# Default to Pro: real work being delegated, pay for quality
-agent:
-  default_model: "deepseek-v4-pro"
-  max_iterations: 50
-  timeout_seconds: 300
-  output_truncate_chars: 50000
-
-# deepseek_chat — single-turn chat, no tools
-# Default to Pro: explicit "ask deepseek a question" → want the better brain
+# `deepseek chat` — single-turn chat, no tools.
+# Default to Pro: explicit "ask deepseek" → want the better brain.
 chat:
   default_model: "deepseek-v4-pro"
 
-# web_search — Brave search + DeepSeek synthesis from snippets
-# Default to Flash: high call volume, summarization is cheap work
+# `deepseek search` — Brave search + DeepSeek synthesis.
+# Default to Flash: high call volume, summarization is cheap work.
 web_search:
   default_model: "deepseek-v4-flash"
   max_results: 10
   max_response_tokens: 8192
 
-# web_fetch — fetch URL + extract with DeepSeek
-# Default to Flash: extraction from already-fetched content is cheap work
+# `deepseek fetch` — fetch URL + extract with DeepSeek.
+# Default to Flash: extraction from already-fetched content is cheap work.
 web_fetch:
   default_model: "deepseek-v4-flash"
   timeout_seconds: 15
   max_content_chars: 50000
   min_content_chars: 500
   max_response_tokens: 8192
-
-# Tool-specific settings (for inner agent tools)
-tools:
-  bash:
-    default_timeout: 120
-    max_timeout: 600
-  glob:
-    max_results: 100
-  grep:
-    max_results: 100
-
-# Security
-security:
-  working_dir: null
-  allow_symlinks: false
-
-# Logging
-logging:
-  level: "INFO"
-  file: "deepseek-agent.log"
-  include_tool_outputs: true

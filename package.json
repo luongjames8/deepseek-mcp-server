@@ -1,15 +1,15 @@
 {
-  "name": "deepseek-agent-mcp",
-  "version": "1.1.0",
-  "description": "MCP server that delegates tasks from Claude to DeepSeek for 10-50x cost savings",
+  "name": "deepseek-cli",
+  "version": "2.0.0",
+  "description": "Streaming DeepSeek CLI with caller-overridable thinking/model/effort. Replaces the deepseek-agent-mcp pattern with a CLI Claude orchestrates directly.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cli.js",
   "bin": {
-    "deepseek-agent-mcp": "dist/index.js"
+    "deepseek": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/cli.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",
@@ -17,14 +17,13 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "mcp",
-    "claude",
     "deepseek",
+    "cli",
     "llm",
     "ai",
-    "model-context-protocol",
-    "anthropic",
-    "claude-code"
+    "claude-code",
+    "streaming",
+    "agentic"
   ],
   "author": "",
   "license": "MIT",
@@ -33,16 +32,16 @@
     "url": "https://github.com/luongjames8/deepseek-mcp-server"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "openai": "^4.77.0",
     "cheerio": "^1.0.0",
-    "js-yaml": "^4.1.0",
+    "commander": "^14.0.3",
+    "dotenv": "^16.4.0",
     "glob": "^11.0.0",
-    "dotenv": "^16.4.0"
+    "js-yaml": "^4.1.0",
+    "openai": "^4.77.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
     "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },

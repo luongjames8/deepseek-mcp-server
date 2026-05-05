@@ -1,5 +1,5 @@
 /**
- * Configuration loading for DeepSeek Agent MCP Server
+ * Configuration loading for the DeepSeek CLI.
  */
 
 import { readFileSync, existsSync } from "fs";
@@ -9,7 +9,6 @@ import yaml from "js-yaml";
 import { config as dotenvConfig } from "dotenv";
 import type { Config } from "./types.js";
 
-// Load .env file from multiple locations
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPaths = [
   join(process.cwd(), ".env"),
@@ -24,7 +23,6 @@ for (const envPath of envPaths) {
   }
 }
 
-// Default configuration
 const DEFAULT_CONFIG: Config = {
   model: {
     default: "deepseek-v4-pro",
@@ -35,31 +33,8 @@ const DEFAULT_CONFIG: Config = {
       "deepseek-reasoner",
     ],
   },
-  agent: {
-    defaultModel: "deepseek-v4-pro",
-    maxIterations: 50,
-    timeoutSeconds: 300,
-    outputTruncateChars: 50000,
-  },
   chat: {
     defaultModel: "deepseek-v4-pro",
-  },
-  tools: {
-    bash: {
-      defaultTimeout: 120,
-      maxTimeout: 600,
-    },
-    globMaxResults: 100,
-    grepMaxResults: 100,
-  },
-  security: {
-    workingDir: null,
-    allowSymlinks: false,
-  },
-  logging: {
-    level: "INFO",
-    file: null,
-    includeToolOutputs: true,
   },
   webFetch: {
     defaultModel: "deepseek-v4-flash",
@@ -77,9 +52,6 @@ const DEFAULT_CONFIG: Config = {
   },
 };
 
-/**
- * Load configuration from YAML file or use defaults
- */
 export function loadConfig(configPath?: string): Config {
   const config = structuredClone(DEFAULT_CONFIG);
 
@@ -87,7 +59,7 @@ export function loadConfig(configPath?: string): Config {
     const searchPaths = [
       join(process.cwd(), "config.yaml"),
       join(__dirname, "..", "config.yaml"),
-      join(process.env.HOME || "", ".config", "deepseek-agent", "config.yaml"),
+      join(process.env.HOME || "", ".config", "deepseek-cli", "config.yaml"),
     ];
     for (const path of searchPaths) {
       if (existsSync(path)) {
@@ -101,112 +73,53 @@ export function loadConfig(configPath?: string): Config {
     try {
       const content = readFileSync(configPath, "utf-8");
       const data = yaml.load(content) as Record<string, unknown>;
+      if (!data) return config;
 
-      if (data) {
-        if (data.model && typeof data.model === "object") {
-          const m = data.model as Record<string, unknown>;
-          config.model = {
-            default: (m.default as string) ?? config.model.default,
-            allowed: (m.allowed as string[]) ?? config.model.allowed,
-          };
-        }
+      if (data.model && typeof data.model === "object") {
+        const m = data.model as Record<string, unknown>;
+        config.model = {
+          default: (m.default as string) ?? config.model.default,
+          allowed: (m.allowed as string[]) ?? config.model.allowed,
+        };
+      }
 
-        if (data.agent && typeof data.agent === "object") {
-          const a = data.agent as Record<string, unknown>;
-          config.agent = {
-            defaultModel:
-              (a.default_model as string) ?? config.agent.defaultModel,
-            maxIterations:
-              (a.max_iterations as number) ?? config.agent.maxIterations,
-            timeoutSeconds:
-              (a.timeout_seconds as number) ?? config.agent.timeoutSeconds,
-            outputTruncateChars:
-              (a.output_truncate_chars as number) ??
-              config.agent.outputTruncateChars,
-          };
-        }
+      if (data.chat && typeof data.chat === "object") {
+        const c = data.chat as Record<string, unknown>;
+        config.chat = {
+          defaultModel: (c.default_model as string) ?? config.chat.defaultModel,
+        };
+      }
 
-        if (data.chat && typeof data.chat === "object") {
-          const c = data.chat as Record<string, unknown>;
-          config.chat = {
-            defaultModel:
-              (c.default_model as string) ?? config.chat.defaultModel,
-          };
-        }
+      if (data.web_fetch && typeof data.web_fetch === "object") {
+        const wf = data.web_fetch as Record<string, unknown>;
+        config.webFetch = {
+          defaultModel:
+            (wf.default_model as string) ?? config.webFetch.defaultModel,
+          timeoutSeconds:
+            (wf.timeout_seconds as number) ?? config.webFetch.timeoutSeconds,
+          maxContentChars:
+            (wf.max_content_chars as number) ??
+            config.webFetch.maxContentChars,
+          minContentChars:
+            (wf.min_content_chars as number) ??
+            config.webFetch.minContentChars,
+          maxResponseTokens:
+            (wf.max_response_tokens as number) ??
+            config.webFetch.maxResponseTokens,
+          userAgent: (wf.user_agent as string) ?? config.webFetch.userAgent,
+        };
+      }
 
-        if (data.tools && typeof data.tools === "object") {
-          const t = data.tools as Record<string, unknown>;
-          const bashData = (t.bash ?? {}) as Record<string, unknown>;
-          const globData = (t.glob ?? {}) as Record<string, unknown>;
-          const grepData = (t.grep ?? {}) as Record<string, unknown>;
-          config.tools = {
-            bash: {
-              defaultTimeout:
-                (bashData.default_timeout as number) ??
-                config.tools.bash.defaultTimeout,
-              maxTimeout:
-                (bashData.max_timeout as number) ??
-                config.tools.bash.maxTimeout,
-            },
-            globMaxResults:
-              (globData.max_results as number) ?? config.tools.globMaxResults,
-            grepMaxResults:
-              (grepData.max_results as number) ?? config.tools.grepMaxResults,
-          };
-        }
-
-        if (data.security && typeof data.security === "object") {
-          const s = data.security as Record<string, unknown>;
-          config.security = {
-            workingDir: (s.working_dir as string | null) ?? null,
-            allowSymlinks:
-              (s.allow_symlinks as boolean) ?? config.security.allowSymlinks,
-          };
-        }
-
-        if (data.logging && typeof data.logging === "object") {
-          const l = data.logging as Record<string, unknown>;
-          config.logging = {
-            level: (l.level as string) ?? config.logging.level,
-            file: (l.file as string | null) ?? null,
-            includeToolOutputs:
-              (l.include_tool_outputs as boolean) ??
-              config.logging.includeToolOutputs,
-          };
-        }
-
-        if (data.web_fetch && typeof data.web_fetch === "object") {
-          const wf = data.web_fetch as Record<string, unknown>;
-          config.webFetch = {
-            defaultModel:
-              (wf.default_model as string) ?? config.webFetch.defaultModel,
-            timeoutSeconds:
-              (wf.timeout_seconds as number) ?? config.webFetch.timeoutSeconds,
-            maxContentChars:
-              (wf.max_content_chars as number) ??
-              config.webFetch.maxContentChars,
-            minContentChars:
-              (wf.min_content_chars as number) ??
-              config.webFetch.minContentChars,
-            maxResponseTokens:
-              (wf.max_response_tokens as number) ??
-              config.webFetch.maxResponseTokens,
-            userAgent: (wf.user_agent as string) ?? config.webFetch.userAgent,
-          };
-        }
-
-        if (data.web_search && typeof data.web_search === "object") {
-          const ws = data.web_search as Record<string, unknown>;
-          config.webSearch = {
-            defaultModel:
-              (ws.default_model as string) ?? config.webSearch.defaultModel,
-            maxResults:
-              (ws.max_results as number) ?? config.webSearch.maxResults,
-            maxResponseTokens:
-              (ws.max_response_tokens as number) ??
-              config.webSearch.maxResponseTokens,
-          };
-        }
+      if (data.web_search && typeof data.web_search === "object") {
+        const ws = data.web_search as Record<string, unknown>;
+        config.webSearch = {
+          defaultModel:
+            (ws.default_model as string) ?? config.webSearch.defaultModel,
+          maxResults: (ws.max_results as number) ?? config.webSearch.maxResults,
+          maxResponseTokens:
+            (ws.max_response_tokens as number) ??
+            config.webSearch.maxResponseTokens,
+        };
       }
     } catch (e) {
       console.error(`Error loading config from ${configPath}:`, e);

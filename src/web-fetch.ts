@@ -1,35 +1,41 @@
 /**
- * Web fetch and content extraction for DeepSeek Agent MCP
+ * Web fetch and HTML→text extraction.
  *
- * Fetches URLs, parses HTML to clean text, and processes with DeepSeek.
- * Drop-in replacement for Claude's WebFetch tool, but cheaper.
+ * Pure I/O + HTML parsing. No model calls. The CLI composes this with
+ * streamChat to deliver the "summarize a URL" subcommand.
  */
 
 import * as cheerio from "cheerio";
-import OpenAI from "openai";
-import type { FetchResult, WebFetchConfig, ModelCallParams } from "./types.js";
-import { getApiKey, getBaseUrl } from "./config.js";
-import { buildExtraParams } from "./api-params.js";
+import type { FetchResult, WebFetchConfig } from "./types.js";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-/**
- * Fetch URL content using native fetch
- */
+export type WebFetchOptions = Partial<WebFetchConfig>;
+
+function effectiveConfig(options: WebFetchOptions = {}): WebFetchConfig {
+  return {
+    defaultModel: options.defaultModel ?? "deepseek-v4-flash",
+    timeoutSeconds: options.timeoutSeconds ?? 15,
+    maxContentChars: options.maxContentChars ?? 50000,
+    minContentChars: options.minContentChars ?? 500,
+    maxResponseTokens: options.maxResponseTokens ?? 8192,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+  };
+}
+
 async function fetchUrl(url: string, config: WebFetchConfig): Promise<FetchResult> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
-      config.timeoutSeconds * 1000
+      config.timeoutSeconds * 1000,
     );
 
     const response = await fetch(url, {
       headers: {
         "User-Agent": config.userAgent || DEFAULT_USER_AGENT,
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
       },
       signal: controller.signal,
@@ -47,11 +53,7 @@ async function fetchUrl(url: string, config: WebFetchConfig): Promise<FetchResul
     }
 
     const content = await response.text();
-    return {
-      success: true,
-      content,
-      charsExtracted: content.length,
-    };
+    return { success: true, content, charsExtracted: content.length };
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
       return {
@@ -70,19 +72,12 @@ async function fetchUrl(url: string, config: WebFetchConfig): Promise<FetchResul
   }
 }
 
-/**
- * Parse HTML and extract main content using Cheerio
- */
 function parseHtml(html: string, config: WebFetchConfig): FetchResult {
   try {
     const $ = cheerio.load(html);
 
-    // Remove noise elements
-    $(
-      "script, style, nav, footer, aside, header, noscript, iframe, form, button"
-    ).remove();
+    $("script, style, nav, footer, aside, header, noscript, iframe, form, button").remove();
 
-    // Remove common noise classes
     const noiseSelectors = [
       ".sidebar",
       ".ads",
@@ -98,7 +93,6 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
       $(selector).remove();
     }
 
-    // Try to find main content using common selectors
     const contentSelectors = [
       "article",
       "main",
@@ -108,7 +102,7 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
       ".article-body",
       ".entry-content",
       "[role='main']",
-      ".mw-parser-output", // Wikipedia
+      ".mw-parser-output",
     ];
 
     let content = "";
@@ -123,18 +117,13 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
       }
     }
 
-    // Fallback to body
     if (!content || content.length < config.minContentChars) {
       const body = $("body");
-      if (body.length) {
-        content = body.text().trim();
-      }
+      if (body.length) content = body.text().trim();
     }
 
-    // Clean up whitespace
     content = content.replace(/\s+/g, " ").trim();
 
-    // Check minimum content
     if (content.length < config.minContentChars) {
       return {
         success: false,
@@ -144,16 +133,11 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
       };
     }
 
-    // Truncate if too long
     if (content.length > config.maxContentChars) {
       content = content.slice(0, config.maxContentChars) + "\n\n[Content truncated...]";
     }
 
-    return {
-      success: true,
-      content,
-      charsExtracted: content.length,
-    };
+    return { success: true, content, charsExtracted: content.length };
   } catch (e) {
     return {
       success: false,
@@ -164,160 +148,42 @@ function parseHtml(html: string, config: WebFetchConfig): FetchResult {
   }
 }
 
-/**
- * Send content to DeepSeek for processing
- */
-async function processWithDeepseek(
-  content: string,
-  prompt: string,
-  config: WebFetchConfig,
-  modelParams: ModelCallParams,
-): Promise<string> {
-  const client = new OpenAI({
-    apiKey: getApiKey(),
-    baseURL: getBaseUrl(),
-  });
-
-  const fullPrompt = `Given this web page content:
-
-${content}
-
----
-
-${prompt}`;
-
-  const model = modelParams.model ?? config.defaultModel;
-  // For web_fetch we apply a sensible default max_tokens unless caller overrides,
-  // since extraction tasks have a natural cap.
-  const effectiveParams: ModelCallParams = {
-    ...modelParams,
-    maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
-  };
-  const extra = buildExtraParams(effectiveParams);
-
-  const body = {
-    model,
-    messages: [{ role: "user" as const, content: fullPrompt }],
-    temperature: 0.1,
-    ...extra,
-  };
-
-  const response = await client.chat.completions.create(
-    body as unknown as Parameters<typeof client.chat.completions.create>[0],
-  );
-
-  return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
+export interface ExtractedPage {
+  url: string;
+  content: string;
+  charsExtracted: number;
+  fetchMs: number;
+  parseMs: number;
 }
 
 /**
- * Main entry point: fetch URL, parse HTML, process with DeepSeek
+ * Fetch a URL and return cleaned text content. Throws on failure.
  */
-export async function fetchAndProcess(
+export async function fetchAndExtract(
   url: string,
-  prompt: string,
-  config?: Partial<WebFetchConfig>,
-  modelParams: ModelCallParams = {},
-): Promise<string> {
-  const effectiveConfig: WebFetchConfig = {
-    defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
-    timeoutSeconds: config?.timeoutSeconds ?? 15,
-    maxContentChars: config?.maxContentChars ?? 50000,
-    minContentChars: config?.minContentChars ?? 500,
-    maxResponseTokens: config?.maxResponseTokens ?? 8192,
-    userAgent: config?.userAgent ?? DEFAULT_USER_AGENT,
-  };
+  options: WebFetchOptions = {},
+): Promise<ExtractedPage> {
+  const config = effectiveConfig(options);
 
-  const totalStart = Date.now();
-
-  // Step 1: Fetch URL
   const fetchStart = Date.now();
-  const fetchResult = await fetchUrl(url, effectiveConfig);
+  const fetchResult = await fetchUrl(url, config);
   const fetchMs = Date.now() - fetchStart;
-
   if (!fetchResult.success) {
-    return `[web_fetch: ${url}]\nError: ${fetchResult.error}`;
+    throw new Error(`fetch failed: ${fetchResult.error}`);
   }
 
-  // Step 2: Parse HTML
   const parseStart = Date.now();
-  const parseResult = parseHtml(fetchResult.content, effectiveConfig);
+  const parseResult = parseHtml(fetchResult.content, config);
   const parseMs = Date.now() - parseStart;
-
   if (!parseResult.success) {
-    return `[web_fetch: ${url}]\nError: ${parseResult.error}`;
+    throw new Error(`parse failed: ${parseResult.error}`);
   }
 
-  // Step 3: Process with DeepSeek
-  try {
-    const deepseekStart = Date.now();
-    const response = await processWithDeepseek(
-      parseResult.content,
-      prompt,
-      effectiveConfig,
-      modelParams,
-    );
-    const deepseekMs = Date.now() - deepseekStart;
-    const totalMs = Date.now() - totalStart;
-
-    return `[web_fetch: ${url}]
-Chars extracted: ${parseResult.charsExtracted}
-Timing: fetch=${fetchMs}ms, parse=${parseMs}ms, deepseek=${deepseekMs}ms, total=${totalMs}ms
-
-${response}`;
-  } catch (e) {
-    return `[web_fetch: ${url}]\nError: DeepSeek processing failed: ${e}`;
-  }
-}
-
-/**
- * Fetch URL and return raw extracted text (no DeepSeek processing).
- * Used for content verification where exact text matching is needed.
- */
-export async function fetchRaw(
-  url: string,
-  config?: Partial<WebFetchConfig>
-): Promise<string> {
-  const effectiveConfig: WebFetchConfig = {
-    defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
-    timeoutSeconds: config?.timeoutSeconds ?? 15,
-    maxContentChars: config?.maxContentChars ?? 50000,
-    minContentChars: config?.minContentChars ?? 500,
-    maxResponseTokens: config?.maxResponseTokens ?? 8192,
-    userAgent: config?.userAgent ?? DEFAULT_USER_AGENT,
+  return {
+    url,
+    content: parseResult.content,
+    charsExtracted: parseResult.charsExtracted,
+    fetchMs,
+    parseMs,
   };
-
-  const totalStart = Date.now();
-  const timing = { fetch: 0, parse: 0, total: 0 };
-
-  // Step 1: Fetch URL
-  const fetchStart = Date.now();
-  const fetchResult = await fetchUrl(url, effectiveConfig);
-  timing.fetch = Date.now() - fetchStart;
-
-  if (!fetchResult.success) {
-    return `[web_fetch_raw: ${url}]
-Status: error
-Error: ${fetchResult.error}`;
-  }
-
-  // Step 2: Parse HTML (reuse existing parseHtml)
-  const parseStart = Date.now();
-  const parseResult = parseHtml(fetchResult.content, effectiveConfig);
-  timing.parse = Date.now() - parseStart;
-
-  if (!parseResult.success) {
-    return `[web_fetch_raw: ${url}]
-Status: error
-Error: ${parseResult.error}`;
-  }
-
-  // Step 3: Return raw content (NO DeepSeek processing)
-  timing.total = Date.now() - totalStart;
-
-  return `[web_fetch_raw: ${url}]
-Status: ok
-Chars extracted: ${parseResult.charsExtracted}
-Timing: fetch=${timing.fetch}ms, parse=${timing.parse}ms, total=${timing.total}ms
-
-${parseResult.content}`;
 }

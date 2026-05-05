@@ -1,12 +1,15 @@
 /**
- * Web search implementation for DeepSeek Agent MCP
+ * Brave Search API wrapper.
  *
- * Searches the web using Brave Search API and synthesizes results from
- * search snippets using DeepSeek. Fast and lightweight - use web_fetch
- * for deep dives on specific URLs.
+ * Pure I/O. No model calls. The CLI composes this with streamChat to
+ * deliver the "search the web and synthesize" subcommand.
  */
-import type { WebSearchConfig, ModelCallParams } from "./types.js";
+import type { SearchResult } from "./types.js";
+export interface BraveSearchOptions {
+    maxResults?: number;
+}
+export declare function braveSearch(query: string, options?: BraveSearchOptions): Promise<SearchResult[]>;
 /**
- * Main entry point: search and synthesize from snippets
+ * Format search results into a synthesis prompt for the model.
  */
-export declare function searchAndSynthesize(query: string, config?: Partial<WebSearchConfig>, modelParams?: ModelCallParams): Promise<string>;
+export declare function buildSynthesisPrompt(query: string, results: SearchResult[]): string;

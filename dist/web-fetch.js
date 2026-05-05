@@ -1,17 +1,21 @@
 /**
- * Web fetch and content extraction for DeepSeek Agent MCP
+ * Web fetch and HTML→text extraction.
  *
- * Fetches URLs, parses HTML to clean text, and processes with DeepSeek.
- * Drop-in replacement for Claude's WebFetch tool, but cheaper.
+ * Pure I/O + HTML parsing. No model calls. The CLI composes this with
+ * streamChat to deliver the "summarize a URL" subcommand.
  */
 import * as cheerio from "cheerio";
-import OpenAI from "openai";
-import { getApiKey, getBaseUrl } from "./config.js";
-import { buildExtraParams } from "./api-params.js";
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-/**
- * Fetch URL content using native fetch
- */
+function effectiveConfig(options = {}) {
+    return {
+        defaultModel: options.defaultModel ?? "deepseek-v4-flash",
+        timeoutSeconds: options.timeoutSeconds ?? 15,
+        maxContentChars: options.maxContentChars ?? 50000,
+        minContentChars: options.minContentChars ?? 500,
+        maxResponseTokens: options.maxResponseTokens ?? 8192,
+        userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+    };
+}
 async function fetchUrl(url, config) {
     try {
         const controller = new AbortController();
@@ -34,11 +38,7 @@ async function fetchUrl(url, config) {
             };
         }
         const content = await response.text();
-        return {
-            success: true,
-            content,
-            charsExtracted: content.length,
-        };
+        return { success: true, content, charsExtracted: content.length };
     }
     catch (e) {
         if (e instanceof Error && e.name === "AbortError") {
@@ -57,15 +57,10 @@ async function fetchUrl(url, config) {
         };
     }
 }
-/**
- * Parse HTML and extract main content using Cheerio
- */
 function parseHtml(html, config) {
     try {
         const $ = cheerio.load(html);
-        // Remove noise elements
         $("script, style, nav, footer, aside, header, noscript, iframe, form, button").remove();
-        // Remove common noise classes
         const noiseSelectors = [
             ".sidebar",
             ".ads",
@@ -80,7 +75,6 @@ function parseHtml(html, config) {
         for (const selector of noiseSelectors) {
             $(selector).remove();
         }
-        // Try to find main content using common selectors
         const contentSelectors = [
             "article",
             "main",
@@ -90,7 +84,7 @@ function parseHtml(html, config) {
             ".article-body",
             ".entry-content",
             "[role='main']",
-            ".mw-parser-output", // Wikipedia
+            ".mw-parser-output",
         ];
         let content = "";
         for (const selector of contentSelectors) {
@@ -103,16 +97,12 @@ function parseHtml(html, config) {
                 }
             }
         }
-        // Fallback to body
         if (!content || content.length < config.minContentChars) {
             const body = $("body");
-            if (body.length) {
+            if (body.length)
                 content = body.text().trim();
-            }
         }
-        // Clean up whitespace
         content = content.replace(/\s+/g, " ").trim();
-        // Check minimum content
         if (content.length < config.minContentChars) {
             return {
                 success: false,
@@ -121,15 +111,10 @@ function parseHtml(html, config) {
                 error: `Content too short (${content.length} chars). Page may require JavaScript.`,
             };
         }
-        // Truncate if too long
         if (content.length > config.maxContentChars) {
             content = content.slice(0, config.maxContentChars) + "\n\n[Content truncated...]";
         }
-        return {
-            success: true,
-            content,
-            charsExtracted: content.length,
-        };
+        return { success: true, content, charsExtracted: content.length };
     }
     catch (e) {
         return {
@@ -141,120 +126,28 @@ function parseHtml(html, config) {
     }
 }
 /**
- * Send content to DeepSeek for processing
+ * Fetch a URL and return cleaned text content. Throws on failure.
  */
-async function processWithDeepseek(content, prompt, config, modelParams) {
-    const client = new OpenAI({
-        apiKey: getApiKey(),
-        baseURL: getBaseUrl(),
-    });
-    const fullPrompt = `Given this web page content:
-
-${content}
-
----
-
-${prompt}`;
-    const model = modelParams.model ?? config.defaultModel;
-    // For web_fetch we apply a sensible default max_tokens unless caller overrides,
-    // since extraction tasks have a natural cap.
-    const effectiveParams = {
-        ...modelParams,
-        maxTokens: modelParams.maxTokens ?? config.maxResponseTokens,
-    };
-    const extra = buildExtraParams(effectiveParams);
-    const body = {
-        model,
-        messages: [{ role: "user", content: fullPrompt }],
-        temperature: 0.1,
-        ...extra,
-    };
-    const response = await client.chat.completions.create(body);
-    return ("choices" in response ? response.choices[0]?.message?.content : "") ?? "";
-}
-/**
- * Main entry point: fetch URL, parse HTML, process with DeepSeek
- */
-export async function fetchAndProcess(url, prompt, config, modelParams = {}) {
-    const effectiveConfig = {
-        defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
-        timeoutSeconds: config?.timeoutSeconds ?? 15,
-        maxContentChars: config?.maxContentChars ?? 50000,
-        minContentChars: config?.minContentChars ?? 500,
-        maxResponseTokens: config?.maxResponseTokens ?? 8192,
-        userAgent: config?.userAgent ?? DEFAULT_USER_AGENT,
-    };
-    const totalStart = Date.now();
-    // Step 1: Fetch URL
+export async function fetchAndExtract(url, options = {}) {
+    const config = effectiveConfig(options);
     const fetchStart = Date.now();
-    const fetchResult = await fetchUrl(url, effectiveConfig);
+    const fetchResult = await fetchUrl(url, config);
     const fetchMs = Date.now() - fetchStart;
     if (!fetchResult.success) {
-        return `[web_fetch: ${url}]\nError: ${fetchResult.error}`;
+        throw new Error(`fetch failed: ${fetchResult.error}`);
     }
-    // Step 2: Parse HTML
     const parseStart = Date.now();
-    const parseResult = parseHtml(fetchResult.content, effectiveConfig);
+    const parseResult = parseHtml(fetchResult.content, config);
     const parseMs = Date.now() - parseStart;
     if (!parseResult.success) {
-        return `[web_fetch: ${url}]\nError: ${parseResult.error}`;
+        throw new Error(`parse failed: ${parseResult.error}`);
     }
-    // Step 3: Process with DeepSeek
-    try {
-        const deepseekStart = Date.now();
-        const response = await processWithDeepseek(parseResult.content, prompt, effectiveConfig, modelParams);
-        const deepseekMs = Date.now() - deepseekStart;
-        const totalMs = Date.now() - totalStart;
-        return `[web_fetch: ${url}]
-Chars extracted: ${parseResult.charsExtracted}
-Timing: fetch=${fetchMs}ms, parse=${parseMs}ms, deepseek=${deepseekMs}ms, total=${totalMs}ms
-
-${response}`;
-    }
-    catch (e) {
-        return `[web_fetch: ${url}]\nError: DeepSeek processing failed: ${e}`;
-    }
-}
-/**
- * Fetch URL and return raw extracted text (no DeepSeek processing).
- * Used for content verification where exact text matching is needed.
- */
-export async function fetchRaw(url, config) {
-    const effectiveConfig = {
-        defaultModel: config?.defaultModel ?? "deepseek-v4-flash",
-        timeoutSeconds: config?.timeoutSeconds ?? 15,
-        maxContentChars: config?.maxContentChars ?? 50000,
-        minContentChars: config?.minContentChars ?? 500,
-        maxResponseTokens: config?.maxResponseTokens ?? 8192,
-        userAgent: config?.userAgent ?? DEFAULT_USER_AGENT,
+    return {
+        url,
+        content: parseResult.content,
+        charsExtracted: parseResult.charsExtracted,
+        fetchMs,
+        parseMs,
     };
-    const totalStart = Date.now();
-    const timing = { fetch: 0, parse: 0, total: 0 };
-    // Step 1: Fetch URL
-    const fetchStart = Date.now();
-    const fetchResult = await fetchUrl(url, effectiveConfig);
-    timing.fetch = Date.now() - fetchStart;
-    if (!fetchResult.success) {
-        return `[web_fetch_raw: ${url}]
-Status: error
-Error: ${fetchResult.error}`;
-    }
-    // Step 2: Parse HTML (reuse existing parseHtml)
-    const parseStart = Date.now();
-    const parseResult = parseHtml(fetchResult.content, effectiveConfig);
-    timing.parse = Date.now() - parseStart;
-    if (!parseResult.success) {
-        return `[web_fetch_raw: ${url}]
-Status: error
-Error: ${parseResult.error}`;
-    }
-    // Step 3: Return raw content (NO DeepSeek processing)
-    timing.total = Date.now() - totalStart;
-    return `[web_fetch_raw: ${url}]
-Status: ok
-Chars extracted: ${parseResult.charsExtracted}
-Timing: fetch=${timing.fetch}ms, parse=${timing.parse}ms, total=${timing.total}ms
-
-${parseResult.content}`;
 }
 //# sourceMappingURL=web-fetch.js.map

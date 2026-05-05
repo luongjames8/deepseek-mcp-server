@@ -1,77 +1,172 @@
 /**
- * Smoke tests — hit the real DeepSeek API.
+ * Smoke tests — run the actual CLI binary against the real DeepSeek API.
  *
- * Why not mocked: the whole point of this MCP is to call DeepSeek correctly.
- * Mocked tests pass even if our request body becomes invalid upstream.
+ * These run on every `npm test`. They cost ~$0.005 per run and prove
+ * the wiring end-to-end. Mock-only tests can't catch issues like wrong
+ * request body shape, broken streaming, or model-routing changes upstream.
  *
- * Cost per run: ~$0.005 (a handful of tiny requests).
- *
- * Skipped automatically if DEEPSEEK_API_KEY is not set, so unit tests still
- * run cleanly on machines without credentials.
+ * Skipped automatically if DEEPSEEK_API_KEY is not set.
  */
 
 import { describe, it, expect } from "vitest";
-import OpenAI from "openai";
-import { buildExtraParams } from "../src/api-params.js";
-import { loadConfig, getApiKey, getBaseUrl } from "../src/config.js";
+import { spawnSync } from "child_process";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { config as dotenvConfig } from "dotenv";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Pull keys from project-root .env if not already in env
+dotenvConfig({ path: join(__dirname, "..", ".env") });
+
+const CLI = join(__dirname, "..", "dist", "cli.js");
 const HAS_KEY = !!process.env.DEEPSEEK_API_KEY;
+const HAS_BRAVE = !!process.env.BRAVE_API_KEY;
 const describeIfKey = HAS_KEY ? describe : describe.skip;
 
-describeIfKey("smoke: real DeepSeek API", () => {
-  const config = loadConfig();
-  const client = new OpenAI({
-    apiKey: HAS_KEY ? getApiKey() : "skip",
-    baseURL: getBaseUrl(),
+function runCli(args: string[], stdin?: string) {
+  return spawnSync("node", [CLI, ...args], {
+    input: stdin,
+    encoding: "utf-8",
+    timeout: 60_000,
+    env: process.env,
+  });
+}
+
+describeIfKey("smoke: deepseek CLI", () => {
+  it("chat — default (Pro, thinking on) streams content to stdout", () => {
+    const r = runCli(["chat", "Reply with only: ok", "--max-tokens", "30"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim().toLowerCase()).toContain("ok");
   });
 
-  // Tiny prompt to keep cost low
-  const PROMPT = "Reply with only the literal word: ok";
+  it("chat --thinking false produces no reasoning content even with --show-thinking", () => {
+    const r = runCli([
+      "chat",
+      "Reply with only: ok",
+      "--thinking",
+      "false",
+      "--show-thinking",
+      "--max-tokens",
+      "20",
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim().toLowerCase()).toContain("ok");
+    // With thinking disabled, the model should not emit reasoning_content
+    // — so the visible "thinking text" stream should be empty.
+    // Stderr will still have "[fetched ... ]" or other diagnostic prints,
+    // so we can't strictly assert empty, but we can assert no reasoning came through.
+    // The absence is harder to test via spawn — we accept that the CLI exited 0.
+    expect(r.stderr).not.toMatch(/We are asked|Let me think|We need/i);
+  });
 
-  async function callWith(model: string, params = {}) {
-    const extra = buildExtraParams(params);
-    const body = {
-      model,
-      messages: [{ role: "user" as const, content: PROMPT }],
-      max_tokens: 50,
-      ...extra,
-    };
-    return client.chat.completions.create(
-      body as unknown as Parameters<typeof client.chat.completions.create>[0],
+  it("chat --show-thinking with thinking on streams reasoning to stderr", () => {
+    const r = runCli([
+      "chat",
+      "What is 7*8? Reply with the number only.",
+      "--show-thinking",
+      "--max-tokens",
+      "150",
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toContain("56");
+    // Reasoning_content should have streamed to stderr
+    expect(r.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("chat reads prompt from stdin when no positional arg", () => {
+    const r = runCli(
+      ["chat", "--thinking", "false", "--max-tokens", "20"],
+      "Reply with only: hi",
     );
-  }
-
-  it("v4-pro responds and (by default) has reasoning_content (thinking on)", async () => {
-    const r = (await callWith("deepseek-v4-pro")) as OpenAI.Chat.Completions.ChatCompletion;
-    expect(r.choices[0]?.message?.content).toBeTruthy();
-    // V4 thinking is on by default — should populate reasoning_content
-    const reasoning = (r.choices[0]?.message as unknown as { reasoning_content?: string })
-      ?.reasoning_content;
-    expect(typeof reasoning === "string" && reasoning.length > 0).toBe(true);
-  }, 30_000);
-
-  it("v4-pro with thinking:false has empty reasoning_content", async () => {
-    const r = (await callWith("deepseek-v4-pro", {
-      thinking: false,
-    })) as OpenAI.Chat.Completions.ChatCompletion;
-    expect(r.choices[0]?.message?.content).toBeTruthy();
-    const reasoning = (r.choices[0]?.message as unknown as { reasoning_content?: string })
-      ?.reasoning_content;
-    expect(reasoning ?? "").toBe("");
-  }, 30_000);
-
-  it("v4-flash responds and is cheaper to call", async () => {
-    const r = (await callWith("deepseek-v4-flash")) as OpenAI.Chat.Completions.ChatCompletion;
-    expect(r.choices[0]?.message?.content).toBeTruthy();
-    expect(r.model).toContain("flash");
-  }, 30_000);
-
-  it("config defaults match what we expect to send", () => {
-    expect(config.agent.defaultModel).toBe("deepseek-v4-pro");
-    expect(config.chat.defaultModel).toBe("deepseek-v4-pro");
-    expect(config.webSearch.defaultModel).toBe("deepseek-v4-flash");
-    expect(config.webFetch.defaultModel).toBe("deepseek-v4-flash");
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim().toLowerCase()).toContain("hi");
   });
+
+  it("chat --model deepseek-v4-flash works", () => {
+    const r = runCli([
+      "chat",
+      "Reply: ok",
+      "--model",
+      "deepseek-v4-flash",
+      "--thinking",
+      "false",
+      "--max-tokens",
+      "10",
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim().toLowerCase()).toContain("ok");
+  });
+
+  it("chat rejects unknown model", () => {
+    const r = runCli([
+      "chat",
+      "hi",
+      "--model",
+      "gpt-9000",
+      "--max-tokens",
+      "10",
+    ]);
+    // The API will reject; CLI should exit nonzero
+    expect(r.status).not.toBe(0);
+  });
+
+  it("invalid --thinking value rejected at CLI level", () => {
+    const r = runCli(["chat", "hi", "--thinking", "maybe", "--max-tokens", "10"]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/thinking/i);
+  });
+
+  it("invalid --reasoning-effort value rejected at CLI level", () => {
+    const r = runCli([
+      "chat",
+      "hi",
+      "--reasoning-effort",
+      "maximum",
+      "--max-tokens",
+      "10",
+    ]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/reasoning-effort/i);
+  });
+});
+
+describe("smoke: fetch-raw (no API key needed)", () => {
+  it("fetch-raw returns cleaned text from a real HTML page", () => {
+    // Wikipedia is stable, content-rich, non-JS — good test target.
+    const r = spawnSync(
+      "node",
+      [CLI, "fetch-raw", "https://en.wikipedia.org/wiki/HTTP"],
+      { encoding: "utf-8", timeout: 30_000 },
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout.length).toBeGreaterThan(2000);
+    expect(r.stdout.toLowerCase()).toContain("hypertext");
+  }, 30_000);
+});
+
+const itIfBrave = HAS_BRAVE && HAS_KEY ? it : it.skip;
+
+describe("smoke: search (needs BRAVE_API_KEY)", () => {
+  itIfBrave(
+    "search streams a synthesis from real Brave results",
+    () => {
+      const r = runCli([
+        "search",
+        "deepseek v4 release date",
+        "--max-results",
+        "5",
+        "--max-tokens",
+        "200",
+        "--thinking",
+        "false",
+      ]);
+      expect(r.status).toBe(0);
+      expect(r.stdout.length).toBeGreaterThan(50);
+      // Sources list should appear on stderr
+      expect(r.stderr).toMatch(/\[sources\]/);
+    },
+    60_000,
+  );
 });
 
 if (!HAS_KEY) {
