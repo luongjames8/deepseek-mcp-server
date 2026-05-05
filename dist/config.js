@@ -13,7 +13,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const xdgConfigHome = process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
 const envPaths = [
     join(xdgConfigHome, "deepseek", "config.env"),
-    join(process.env.HOME || "", ".config", "deepseek", "config.env"),
     join(process.cwd(), ".env"),
     join(__dirname, "..", ".env"),
     join(process.env.HOME || "", ".env"),

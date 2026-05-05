@@ -18,13 +18,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Same lookup chain as src/config.ts — XDG canonical wins.
 const xdgConfigHome =
   process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
-const envPathCandidates = [
-  join(xdgConfigHome, "deepseek", "config.env"),
-  join(__dirname, "..", ".env"),
-];
-for (const p of envPathCandidates) {
-  dotenvConfig({ path: p });
-}
+dotenvConfig({ path: join(xdgConfigHome, "deepseek", "config.env") });
+dotenvConfig({ path: join(__dirname, "..", ".env") });
 
 const CLI = join(__dirname, "..", "dist", "cli.js");
 const HAS_KEY = !!process.env.DEEPSEEK_API_KEY;
@@ -42,9 +37,12 @@ function runCli(args: string[], stdin?: string) {
 
 describeIfKey("smoke: deepseek CLI", () => {
   it("chat — default (Pro, thinking on) streams content to stdout", () => {
-    const r = runCli(["chat", "Reply with only: ok", "--max-tokens", "30"]);
+    // Math question + generous max_tokens — Pro with thinking on splits
+    // budget between reasoning and output. Tight caps risk empty output
+    // when reasoning consumes the whole budget.
+    const r = runCli(["chat", "What is 6*7? Reply with only the number.", "--max-tokens", "200"]);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim().toLowerCase()).toContain("ok");
+    expect(r.stdout.trim()).toContain("42");
   });
 
   it("chat --thinking false produces no reasoning content even with --show-thinking", () => {
@@ -109,18 +107,21 @@ describeIfKey("smoke: deepseek CLI", () => {
   });
 
   it("chat --model deepseek-v4-flash works", () => {
+    // "Reply: ok" prompt is too easy for the model to ignore in favor of
+    // a chatty greeting. Use a math question — concrete answer the model
+    // can't talk around.
     const r = runCli([
       "chat",
-      "Reply: ok",
+      "What is 9+10? Reply with only the number.",
       "--model",
       "deepseek-v4-flash",
       "--thinking",
       "false",
       "--max-tokens",
-      "10",
+      "20",
     ]);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim().toLowerCase()).toContain("ok");
+    expect(r.stdout.trim()).toContain("19");
   });
 
   it("chat rejects unknown model", () => {
